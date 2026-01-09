@@ -1,0 +1,12 @@
+=== XAUUSD Swap Rates ===
+Fetched: BrokerServer - Account 000000
+
+Swap Long:  -66.99
+Swap Short: 41.2
+Swap Mode:  1 (SYMBOL_SWAP_MODE_POINTS)
+
+=== For C++ Configuration ===
+config.swap_long = -66.99;  // USD per lot per day
+config.swap_short = 41.2;
+config.swap_mode = 1;  // SYMBOL_SWAP_MODE_POINTS
+config.swap_3days = 3;  // Triple swap day (0=Sun, 3=Wed, etc)

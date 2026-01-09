@@ -1,0 +1,19 @@
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	=== Margin Rate Information for XAUUSD ===
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Initial Margin Rate: 1.00000000
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Maintenance Margin Rate: 1.00000000
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	=== Symb Properties ===
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Trade Calc Mode: 4
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Calc Mode Name: CFDLEVERAGE
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Contract Size: 100.0
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Account Leverage: 1:500
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Margin Initial: 0.0
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Margin Maintenance: 0.0
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	=== Margin Calculation Test ===
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Price: 4434.62
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Lots: 1.0
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Calculated Margin: $886.92
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Implied Rate (if CFD_LEVERAGE): 0.99999549
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Implied Rate (if FOREX): 4434.60000000
+2026.01.08 08:15:24.627	GetMarginRate (XAUUSD,M1)	Alert: Margin rate check completed!

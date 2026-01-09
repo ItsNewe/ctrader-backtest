@@ -1,0 +1,12 @@
+Flask==2.3.3
+Flask-CORS==4.0.0
+Werkzeug==2.3.7
+click==8.1.7
+itsdangerous==2.1.2
+Jinja2==3.1.2
+MarkupSafe==2.1.3
+requests==2.31.0
+
+# Optional broker integrations
+# MetaTrader5==5.0.45  # Uncomment to enable MT5 support
+# APScheduler==3.10.4  # Uncomment for scheduled spec refresh

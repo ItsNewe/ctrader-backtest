@@ -1,0 +1,8 @@
+{
+  "test": "Test C - Slippage Analysis",
+  "symbol": "EURUSD",
+  "trades_executed": 50,
+  "lot_size": 0.01,
+  "broker": " Pty Ltd",
+  "account": 000000
+}
