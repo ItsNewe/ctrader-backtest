@@ -205,6 +205,79 @@ Difference: -$160 (essentially equal!)
 
 ---
 
-**Date:** 2026-01-09
+**Date:** 2026-01-09 (Updated: 2026-01-10)
 **Status:** Bug fixed, awaiting verification
 **Next:** Compare with your MT5 rerun results
+
+---
+
+# Update: 2026-01-10 - Triple Swap Timing Analysis
+
+## Major Finding: Triple Swap Day Correction
+
+**Problem**: C++ was charging triple swap on the WRONG day.
+
+**Evidence from MT5 SQL Logs (DAY_CHANGE events)**:
+```
+2025.01.09 Thu: 0.08 lots, -15.60 swap, -195.00/lot (3.00x) *** TRIPLE
+2025.01.10 Fri: 0.09 lots, -5.85 swap, -65.00/lot (1.00x) normal
+2025.01.23 Thu: 0.08 lots, -15.60 swap, -195.00/lot (3.00x) *** TRIPLE
+2025.01.30 Thu: 0.28 lots, -91.65 swap, -327.32/lot (5.03x) *** TRIPLE
+```
+
+Triple swap is charged on **THURSDAY**, not Wednesday!
+
+**Root Cause**:
+- MT5 `swap_3day=3` (Wednesday) indicates WHEN MARKET CLOSES for weekend swap
+- Swap is actually CHARGED when market OPENS after that close
+- Market closes ~23:00 Wednesday, opens ~01:00 Thursday
+- Therefore triple swap is applied Thursday morning
+
+**Fix Applied** (tick_based_engine.h:530):
+```cpp
+// Triple swap is charged on the day AFTER swap_3days
+// e.g., swap_3days=3 (Wednesday) means triple is charged Thursday morning
+int triple_swap_day = (config_.swap_3days + 1) % 7;
+int swap_multiplier = (day_of_week == triple_swap_day) ? 3 : 1;
+```
+
+## Broker Terminal Mapping Confirmed
+
+| Broker | Terminal ID | swap_long | swap_short | Trades | Total Swap | Net Profit |
+|--------|-------------|-----------|------------|--------|------------|------------|
+| Broker | 5EC2F58E... | -65.11 | 33.20 | 145,466 | -$45,315 | $417,151 |
+| Grid | 930119AA... | -66.99 | 41.20 | 130,685 | -$43,148 | $320,580 |
+
+## Swap Mode 1 (Points) Formula Verified
+
+```
+swap_USD = swap_points × point × contract_size × lot_size × multiplier
+
+For XAUUSD:
+- point = 0.01
+- contract_size = 100
+- swap_long = -65.11 points
+
+Example (0.08 lots, triple swap):
+  -65.11 × 0.01 × 100 × 0.08 × 3 = -15.6264 ≈ -15.63 USD ✓
+```
+
+## New Agents/Skills Created
+
+1. `.claude/agents/validate-engine.md` - Deep investigation agent
+2. `.claude/agents/sync-data.md` - Data synchronization agent
+3. `.claude/agents/run-backtest.md` - Backtest execution agent
+4. Updated `.claude/skills/debug-swap.md` with findings
+
+## Tick Data Analysis
+
+- Root `XAUUSD_TICKS_2025.csv` is IDENTICAL to `Grid/XAUUSD_TICKS_2025.csv`
+- Broker has DIFFERENT tick data (different broker's feed)
+- C++ test with root tick file should match Grid, not Broker
+
+## Remaining Discrepancies
+
+After triple swap fix, compare C++ vs Grid:
+- Trade count: ~131K (C++) vs 130,685 (Grid) - close
+- Profit: significant difference remains
+- Need to investigate position sizing algorithm

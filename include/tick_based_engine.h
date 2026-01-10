@@ -524,7 +524,11 @@ private:
             // Calculate swap days to charge
             // Normal: 1 day
             // Triple swap day: 3 days (covers weekend for Mon-Fri instruments)
-            int swap_multiplier = (day_of_week == config_.swap_3days) ? 3 : 1;
+            // IMPORTANT: Triple swap is charged on the day AFTER swap_3days
+            // e.g., swap_3days=3 (Wednesday) means triple is charged Thursday morning
+            // This is because swap_3days indicates when the market closes for extra days
+            int triple_swap_day = (config_.swap_3days + 1) % 7;
+            int swap_multiplier = (day_of_week == triple_swap_day) ? 3 : 1;
 
             double daily_swap = 0.0;
 
