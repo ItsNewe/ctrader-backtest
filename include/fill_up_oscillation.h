@@ -28,7 +28,22 @@ public:
         VELOCITY_FILTER = 3,    // Pause on crash velocity
         ALL_COMBINED = 4,       // All enhancements
         ADAPTIVE_LOOKBACK = 5,  // Adapt lookback period based on volatility regime
-        DOUBLE_ADAPTIVE = 6     // Adaptive spacing + adaptive lookback
+        DOUBLE_ADAPTIVE = 6,    // Adaptive spacing + adaptive lookback
+        TREND_ADAPTIVE = 7      // Adjust spacing based on trend strength (tight in trends, wide in chop)
+    };
+
+    // Adaptive spacing configuration (matching EA input parameters)
+    struct AdaptiveConfig {
+        double typical_vol_pct;
+        double min_spacing_mult;
+        double max_spacing_mult;
+        double min_spacing_abs;
+        double max_spacing_abs;
+        double spacing_change_threshold;
+
+        AdaptiveConfig()
+            : typical_vol_pct(0.5), min_spacing_mult(0.5), max_spacing_mult(3.0),
+              min_spacing_abs(0.5), max_spacing_abs(5.0), spacing_change_threshold(0.1) {}
     };
 
     FillUpOscillation(double survive_pct, double base_spacing,
@@ -37,7 +52,8 @@ public:
                       Mode mode = BASELINE,
                       double antifragile_scale = 0.1,      // 10% more per 5% DD
                       double velocity_threshold = 30.0,     // $30/hour = crash
-                      double volatility_lookback_hours = 4.0)
+                      double volatility_lookback_hours = 4.0,
+                      AdaptiveConfig adaptive_config = AdaptiveConfig())
         : survive_pct_(survive_pct),
           base_spacing_(base_spacing),
           min_volume_(min_volume),
@@ -48,6 +64,7 @@ public:
           antifragile_scale_(antifragile_scale),
           velocity_threshold_(velocity_threshold),
           volatility_lookback_hours_(volatility_lookback_hours),
+          adaptive_config_(adaptive_config),
           lowest_buy_(DBL_MAX),
           highest_buy_(DBL_MIN),
           volume_of_open_trades_(0.0),
@@ -70,7 +87,20 @@ public:
           current_lookback_hours_(volatility_lookback_hours),
           meta_high_(0.0),
           meta_low_(DBL_MAX),
-          lookback_changes_(0)
+          lookback_changes_(0),
+          trend_start_price_(0.0),
+          trend_lookback_hours_(volatility_lookback_hours),
+          trend_spacing_changes_(0),
+          current_timestamp_(""),
+          last_trend_period_id_(-1),
+          calibration_complete_(false),
+          warmup_periods_(30),
+          thresh_strong_(2.0),
+          thresh_moderate_(1.0),
+          thresh_weak_(0.4),
+          last_vol_reset_seconds_(0),
+          last_hour_seconds_(0),
+          last_meta_reset_seconds_(0)
     {
     }
 
@@ -78,6 +108,7 @@ public:
         current_ask_ = tick.ask;
         current_bid_ = tick.bid;
         current_spread_ = tick.spread();
+        current_timestamp_ = tick.timestamp;
         current_equity_ = engine.GetEquity();
         current_balance_ = engine.GetBalance();
         ticks_processed_++;
@@ -118,6 +149,11 @@ public:
             UpdateAdaptiveSpacing();
         }
 
+        // Update trend-adaptive spacing
+        if (mode_ == TREND_ADAPTIVE) {
+            UpdateTrendAdaptiveSpacing();
+        }
+
         // Process positions
         Iterate(engine);
 
@@ -133,6 +169,16 @@ public:
     double GetPeakEquity() const { return peak_equity_; }
     double GetCurrentLookback() const { return current_lookback_hours_; }
     int GetLookbackChanges() const { return lookback_changes_; }
+    int GetTrendSpacingChanges() const { return trend_spacing_changes_; }
+    double GetTrendStrength() const {
+        if (trend_start_price_ <= 0) return 0;
+        return (current_bid_ - trend_start_price_) / trend_start_price_ * 100.0;
+    }
+    bool IsCalibrationComplete() const { return calibration_complete_; }
+    double GetThreshStrong() const { return thresh_strong_; }
+    double GetThreshModerate() const { return thresh_moderate_; }
+    double GetThreshWeak() const { return thresh_weak_; }
+    int GetWarmupSamples() const { return (int)trend_history_.size(); }
 
 private:
     // Base parameters
@@ -148,6 +194,9 @@ private:
     double antifragile_scale_;
     double velocity_threshold_;
     double volatility_lookback_hours_;
+
+    // Configurable adaptive spacing parameters
+    AdaptiveConfig adaptive_config_;
 
     // Position tracking
     double lowest_buy_;
@@ -186,37 +235,75 @@ private:
     double meta_low_;            // Low over longer period
     int lookback_changes_;
 
-    void UpdateVolatility(const Tick& /*tick*/) {
-        // Track hourly prices for velocity and volatility
-        // Approximate: assume ~200 ticks/second, so 720000 ticks/hour
-        long ticks_per_hour = 720000;
+    // Trend tracking (for TREND_ADAPTIVE mode)
+    double trend_start_price_;       // Price at start of trend window
+    double trend_lookback_hours_;    // How far back to measure trend (default: 24h)
+    int trend_spacing_changes_;      // Count of trend-based spacing changes
+    std::string current_timestamp_;  // Current tick timestamp for period detection
+    int last_trend_period_id_;       // Last trend period ID (for timestamp-based detection)
 
-        // Check if new hour
-        if (ticks_processed_ % ticks_per_hour == 0) {
+    // Self-calibration for TREND_ADAPTIVE
+    std::vector<double> trend_history_;     // Collected trend values during warmup
+    bool calibration_complete_;             // Whether warmup calibration is done
+    int warmup_periods_;                    // Number of periods to collect before calibrating
+    double thresh_strong_;                  // Calibrated threshold for strong trend (p75)
+    double thresh_moderate_;                // Calibrated threshold for moderate trend (p50)
+    double thresh_weak_;                    // Calibrated threshold for weak trend (p25)
+
+    // Timestamp-based volatility tracking
+    long last_vol_reset_seconds_;           // Last volatility window reset (seconds)
+    long last_hour_seconds_;                // Last hourly tracking reset (seconds)
+    long last_meta_reset_seconds_;          // Last meta-volatility reset (seconds)
+
+    // Parse "YYYY.MM.DD HH:MM:SS.mmm" to seconds since reference
+    static long ParseTimestampToSeconds(const std::string& ts) {
+        if (ts.size() < 19) return 0;
+        int year = std::stoi(ts.substr(0, 4));
+        int month = std::stoi(ts.substr(5, 2));
+        int day = std::stoi(ts.substr(8, 2));
+        int hour = std::stoi(ts.substr(11, 2));
+        int minute = std::stoi(ts.substr(14, 2));
+        int second = std::stoi(ts.substr(17, 2));
+        int month_days[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+        long days = (long)(year - 2020) * 365 + (year - 2020) / 4;
+        days += month_days[month - 1] + day;
+        if (month > 2 && year % 4 == 0) days++;
+        return days * 86400L + hour * 3600L + minute * 60L + second;
+    }
+
+    void UpdateVolatility(const Tick& tick) {
+        // Parse timestamp to seconds for time-based lookback
+        long current_seconds = ParseTimestampToSeconds(tick.timestamp);
+
+        // Track hourly prices for velocity
+        if (last_hour_seconds_ == 0 || current_seconds - last_hour_seconds_ >= 3600) {
             hourly_prices_.push_back(std::make_pair(ticks_processed_, current_bid_));
             if (hourly_prices_.size() > 24) {
                 hourly_prices_.pop_front();
             }
             hour_start_price_ = current_bid_;
+            last_hour_seconds_ = current_seconds;
         }
 
-        // Track recent high/low for spacing volatility (uses adaptive or fixed lookback)
+        // Reset volatility window based on actual time elapsed
         double effective_lookback = (mode_ == ADAPTIVE_LOOKBACK || mode_ == DOUBLE_ADAPTIVE)
             ? current_lookback_hours_
             : volatility_lookback_hours_;
-        long volatility_ticks = (long)(effective_lookback * ticks_per_hour);
-        if (volatility_ticks > 0 && ticks_processed_ % volatility_ticks == 0) {
+        long lookback_seconds = (long)(effective_lookback * 3600.0);
+
+        if (last_vol_reset_seconds_ == 0 || current_seconds - last_vol_reset_seconds_ >= lookback_seconds) {
             recent_high_ = current_bid_;
             recent_low_ = current_bid_;
+            last_vol_reset_seconds_ = current_seconds;
         }
         recent_high_ = std::max(recent_high_, current_bid_);
         recent_low_ = std::min(recent_low_, current_bid_);
 
-        // Track meta-volatility over longer period (4 hours fixed) for lookback adaptation
-        long meta_ticks = 4 * ticks_per_hour;
-        if (ticks_processed_ % meta_ticks == 0) {
+        // Meta-volatility (4 hours fixed) for lookback adaptation
+        if (last_meta_reset_seconds_ == 0 || current_seconds - last_meta_reset_seconds_ >= 14400) { // 4h
             meta_high_ = current_bid_;
             meta_low_ = current_bid_;
+            last_meta_reset_seconds_ = current_seconds;
         }
         meta_high_ = std::max(meta_high_, current_bid_);
         meta_low_ = std::min(meta_low_, current_bid_);
@@ -238,21 +325,19 @@ private:
     }
 
     void UpdateAdaptiveSpacing() {
-        // Adjust spacing based on recent volatility
         double range = recent_high_ - recent_low_;
         if (range > 0 && recent_high_ > 0 && current_bid_ > 0) {
-            // Typical volatility = 0.5% of current price over 4 hours
-            // This auto-adapts to different price levels:
-            // - At $2,300 gold: typical = $11.50
-            // - At $3,500 gold: typical = $17.50
-            double typical_vol = current_bid_ * 0.005;  // 0.5% of price
+            // Percentage-based typical volatility (auto-adapts to any instrument/price)
+            double typical_vol = current_bid_ * (adaptive_config_.typical_vol_pct / 100.0);
             double vol_ratio = range / typical_vol;
-            vol_ratio = std::max(0.5, std::min(3.0, vol_ratio));  // Clamp 0.5x to 3x
+            vol_ratio = std::max(adaptive_config_.min_spacing_mult,
+                                 std::min(adaptive_config_.max_spacing_mult, vol_ratio));
 
             double new_spacing = base_spacing_ * vol_ratio;
-            new_spacing = std::max(0.5, std::min(5.0, new_spacing));  // Clamp $0.50 to $5
+            new_spacing = std::max(adaptive_config_.min_spacing_abs,
+                                   std::min(adaptive_config_.max_spacing_abs, new_spacing));
 
-            if (std::abs(new_spacing - current_spacing_) > 0.1) {
+            if (std::abs(new_spacing - current_spacing_) > adaptive_config_.spacing_change_threshold) {
                 current_spacing_ = new_spacing;
                 adaptive_spacing_changes_++;
             }
@@ -282,6 +367,105 @@ private:
                 lookback_changes_++;
             }
         }
+    }
+
+    void UpdateTrendAdaptiveSpacing() {
+        // Self-calibrating trend-adaptive spacing
+        // Collects trend samples during warmup, then uses percentiles as thresholds
+
+        // Calculate lookback period in days (hours / 24)
+        int lookback_days = std::max(1, (int)(trend_lookback_hours_ / 24.0));
+
+        // Parse timestamp to get period ID (timestamp format: YYYY.MM.DD HH:MM:SS)
+        int month = 0, day = 0;
+        if (current_timestamp_.length() >= 10) {
+            sscanf(current_timestamp_.c_str(), "%*d.%d.%d", &month, &day);
+        }
+        int day_of_year = (month - 1) * 30 + day;  // Approximate day of year
+        int period_id = day_of_year / lookback_days;
+
+        // Initialize on first tick
+        if (trend_start_price_ <= 0) {
+            trend_start_price_ = current_bid_;
+            last_trend_period_id_ = period_id;
+            return;
+        }
+
+        // At each lookback interval, record the trend and (optionally) reset
+        if (period_id != last_trend_period_id_) {
+            double trend_pct = (current_bid_ - trend_start_price_) / trend_start_price_ * 100.0;
+            double abs_trend = std::abs(trend_pct);
+
+            // Collect trend samples (for analysis/research)
+            trend_history_.push_back(abs_trend);
+
+            // Keep only last 120 samples (~1 year with 3-day periods)
+            while (trend_history_.size() > 120) {
+                trend_history_.erase(trend_history_.begin());
+            }
+
+            // NOTE: NOT resetting trend_start_price_ means we measure cumulative
+            // year-to-date trend instead of rolling period trend. This performs
+            // better in sustained trends (like 2025's bull market) because it
+            // keeps tight spacing throughout.
+            // To use rolling period trend instead, uncomment:
+            // trend_start_price_ = current_bid_;
+
+            last_trend_period_id_ = period_id;
+        }
+
+        // Calculate current trend
+        double trend_pct = (current_bid_ - trend_start_price_) / trend_start_price_ * 100.0;
+        double abs_trend = std::abs(trend_pct);
+
+        // Use calibrated thresholds (or defaults during warmup)
+        // thresh_strong_ = p75, thresh_moderate_ = p50, thresh_weak_ = p25
+        double new_spacing;
+        if (abs_trend >= thresh_strong_) {
+            // Strong trend (top 25%): tight spacing
+            double trend_factor = std::min(1.0, (abs_trend - thresh_strong_) / thresh_strong_);
+            new_spacing = 0.50 - trend_factor * 0.30;
+            new_spacing = std::max(0.20, new_spacing);
+        } else if (abs_trend >= thresh_moderate_) {
+            // Moderate trend (50-75%): medium spacing
+            double range = thresh_strong_ - thresh_moderate_;
+            double trend_factor = (range > 0) ? (abs_trend - thresh_moderate_) / range : 0;
+            new_spacing = 1.50 - trend_factor * 1.0;
+        } else if (abs_trend >= thresh_weak_) {
+            // Weak trend (25-50%): wide spacing
+            double range = thresh_moderate_ - thresh_weak_;
+            double trend_factor = (range > 0) ? (abs_trend - thresh_weak_) / range : 0;
+            new_spacing = 3.00 - trend_factor * 1.5;
+        } else {
+            // Flat market (bottom 25%): widest spacing
+            new_spacing = 5.0;
+        }
+
+        // Update spacing if changed significantly
+        if (std::abs(new_spacing - current_spacing_) > 0.05) {
+            current_spacing_ = new_spacing;
+            trend_spacing_changes_++;
+        }
+    }
+
+    void CalibrateThresholds() {
+        // Calculate percentiles from collected trend data
+        std::vector<double> sorted = trend_history_;
+        std::sort(sorted.begin(), sorted.end());
+
+        size_t n = sorted.size();
+        if (n < 4) return;  // Need at least 4 samples
+
+        // Calculate percentiles: p25, p50, p75
+        thresh_weak_ = sorted[n * 25 / 100];      // 25th percentile
+        thresh_moderate_ = sorted[n * 50 / 100];  // 50th percentile (median)
+        thresh_strong_ = sorted[n * 75 / 100];    // 75th percentile
+
+        // Ensure minimum separation
+        if (thresh_moderate_ <= thresh_weak_) thresh_moderate_ = thresh_weak_ + 0.1;
+        if (thresh_strong_ <= thresh_moderate_) thresh_strong_ = thresh_moderate_ + 0.1;
+
+        calibration_complete_ = true;
     }
 
     double GetAntifragileMultiplier() {

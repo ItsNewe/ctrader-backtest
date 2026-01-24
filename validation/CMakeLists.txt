@@ -1228,3 +1228,694 @@ set_target_properties(test_typical_volatility PROPERTIES
 )
 
 message(STATUS "Typical volatility test configured: test_typical_volatility")
+
+# Oscillation Parameter Sweep
+add_executable(test_oscillation_sweep
+    test_oscillation_sweep.cpp
+)
+
+target_include_directories(test_oscillation_sweep PRIVATE
+    ../include
+)
+
+target_compile_features(test_oscillation_sweep PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_oscillation_sweep PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_oscillation_sweep PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_oscillation_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_oscillation_sweep PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Oscillation sweep test configured: test_oscillation_sweep")
+
+# Frequency Domain Analysis for FillUpOscillation
+add_executable(test_frequency_analysis
+    test_frequency_analysis.cpp
+)
+
+target_include_directories(test_frequency_analysis PRIVATE
+    ../include
+)
+
+target_compile_features(test_frequency_analysis PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_frequency_analysis PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_frequency_analysis PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_frequency_analysis PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_frequency_analysis PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Frequency domain analysis configured: test_frequency_analysis")
+
+# Kapitza Advanced Control Strategy
+add_executable(test_kapitza
+    test_kapitza.cpp
+)
+
+target_include_directories(test_kapitza PRIVATE
+    ../include
+)
+
+target_compile_features(test_kapitza PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_kapitza PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_kapitza PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_kapitza PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_kapitza PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Kapitza test configured: test_kapitza")
+
+# Test: Kapitza Parameter Tuning
+add_executable(test_kapitza_tuning
+    test_kapitza_tuning.cpp
+)
+
+target_include_directories(test_kapitza_tuning PRIVATE
+    ../include
+)
+
+target_compile_features(test_kapitza_tuning PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_kapitza_tuning PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_kapitza_tuning PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_kapitza_tuning PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_kapitza_tuning PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Kapitza tuning test configured: test_kapitza_tuning")
+
+# Test: Attribution Analysis
+add_executable(test_attribution_analysis
+    test_attribution_analysis.cpp
+)
+
+target_include_directories(test_attribution_analysis PRIVATE
+    ../include
+)
+
+target_compile_features(test_attribution_analysis PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_attribution_analysis PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_attribution_analysis PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_attribution_analysis PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_attribution_analysis PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Attribution analysis test configured: test_attribution_analysis")
+
+# Spacing Investigation Test
+add_executable(test_spacing_investigation
+    test_spacing_investigation.cpp
+)
+
+target_include_directories(test_spacing_investigation PRIVATE
+    ../include
+)
+
+target_compile_features(test_spacing_investigation PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_spacing_investigation PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_spacing_investigation PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_spacing_investigation PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_spacing_investigation PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Spacing investigation test configured: test_spacing_investigation")
+
+# Trend Adaptive Test
+add_executable(test_trend_adaptive
+    test_trend_adaptive.cpp
+)
+
+target_include_directories(test_trend_adaptive PRIVATE
+    ../include
+)
+
+target_compile_features(test_trend_adaptive PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_trend_adaptive PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_trend_adaptive PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_trend_adaptive PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_trend_adaptive PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Trend adaptive test configured: test_trend_adaptive")
+
+# Trend Lookback Sweep Test
+add_executable(test_trend_lookback_sweep
+    test_trend_lookback_sweep.cpp
+)
+
+target_include_directories(test_trend_lookback_sweep PRIVATE
+    ../include
+)
+
+target_compile_features(test_trend_lookback_sweep PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_trend_lookback_sweep PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_trend_lookback_sweep PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_trend_lookback_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_trend_lookback_sweep PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Trend lookback sweep configured: test_trend_lookback_sweep")
+
+# Trend Lookback Test (using FillUpOscillation)
+add_executable(test_trend_lookback
+    test_trend_lookback.cpp
+)
+
+target_include_directories(test_trend_lookback PRIVATE
+    ../include
+)
+
+target_compile_features(test_trend_lookback PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_trend_lookback PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_trend_lookback PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_trend_lookback PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_trend_lookback PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Trend lookback test configured: test_trend_lookback")
+
+# Trend Calibration Test
+add_executable(test_trend_calibration
+    test_trend_calibration.cpp
+)
+
+target_include_directories(test_trend_calibration PRIVATE
+    ../include
+)
+
+target_compile_features(test_trend_calibration PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_trend_calibration PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_trend_calibration PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_trend_calibration PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_trend_calibration PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Trend calibration test configured: test_trend_calibration")
+
+# Self-Calibrating Test
+add_executable(test_self_calibrating
+    test_self_calibrating.cpp
+)
+
+target_include_directories(test_self_calibrating PRIVATE
+    ../include
+)
+
+target_compile_features(test_self_calibrating PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_self_calibrating PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_self_calibrating PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_self_calibrating PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_self_calibrating PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Self-calibrating test configured: test_self_calibrating")
+
+add_executable(test_spacing_sweep_simple test_spacing_sweep_simple.cpp)
+target_include_directories(test_spacing_sweep_simple PRIVATE ../include)
+target_compile_features(test_spacing_sweep_simple PRIVATE cxx_std_17)
+target_compile_options(test_spacing_sweep_simple PRIVATE -O3)
+target_link_libraries(test_spacing_sweep_simple PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_spacing_sweep_simple PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_spacing_by_period test_spacing_by_period.cpp)
+target_include_directories(test_spacing_by_period PRIVATE ../include)
+target_compile_features(test_spacing_by_period PRIVATE cxx_std_17)
+target_compile_options(test_spacing_by_period PRIVATE -O3)
+target_link_libraries(test_spacing_by_period PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_spacing_by_period PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_spacing_2024 test_spacing_2024.cpp)
+target_include_directories(test_spacing_2024 PRIVATE ../include)
+target_compile_features(test_spacing_2024 PRIVATE cxx_std_17)
+target_compile_options(test_spacing_2024 PRIVATE -O3)
+target_link_libraries(test_spacing_2024 PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_spacing_2024 PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_oscillation_analysis test_oscillation_analysis.cpp)
+target_include_directories(test_oscillation_analysis PRIVATE ../include)
+target_compile_features(test_oscillation_analysis PRIVATE cxx_std_17)
+target_compile_options(test_oscillation_analysis PRIVATE -O3)
+target_link_libraries(test_oscillation_analysis PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_oscillation_analysis PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_trend_direction test_trend_direction.cpp)
+target_include_directories(test_trend_direction PRIVATE ../include)
+target_compile_features(test_trend_direction PRIVATE cxx_std_17)
+target_compile_options(test_trend_direction PRIVATE -O3)
+target_link_libraries(test_trend_direction PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trend_direction PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_bounce_analysis test_bounce_analysis.cpp)
+target_include_directories(test_bounce_analysis PRIVATE ../include)
+target_compile_features(test_bounce_analysis PRIVATE cxx_std_17)
+target_compile_options(test_bounce_analysis PRIVATE -O3)
+target_link_libraries(test_bounce_analysis PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_bounce_analysis PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_trailing_stop test_trailing_stop.cpp)
+target_include_directories(test_trailing_stop PRIVATE ../include)
+target_compile_features(test_trailing_stop PRIVATE cxx_std_17)
+target_compile_options(test_trailing_stop PRIVATE -O3)
+target_link_libraries(test_trailing_stop PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trailing_stop PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_trailing_v2 test_trailing_v2.cpp)
+target_include_directories(test_trailing_v2 PRIVATE ../include)
+target_compile_features(test_trailing_v2 PRIVATE cxx_std_17)
+target_compile_options(test_trailing_v2 PRIVATE -O3)
+target_link_libraries(test_trailing_v2 PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trailing_v2 PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_trailing_approaches test_trailing_approaches.cpp)
+target_include_directories(test_trailing_approaches PRIVATE ../include)
+target_compile_features(test_trailing_approaches PRIVATE cxx_std_17)
+target_compile_options(test_trailing_approaches PRIVATE -O3)
+target_link_libraries(test_trailing_approaches PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trailing_approaches PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_trailing_sweep test_trailing_sweep.cpp)
+target_include_directories(test_trailing_sweep PRIVATE ../include)
+target_compile_features(test_trailing_sweep PRIVATE cxx_std_17)
+target_compile_options(test_trailing_sweep PRIVATE -O3)
+target_link_libraries(test_trailing_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trailing_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_trailing_full_sweep test_trailing_full_sweep.cpp)
+target_include_directories(test_trailing_full_sweep PRIVATE ../include)
+target_compile_features(test_trailing_full_sweep PRIVATE cxx_std_17)
+target_compile_options(test_trailing_full_sweep PRIVATE -O3)
+target_link_libraries(test_trailing_full_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trailing_full_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+add_executable(test_trailing_5d_sweep test_trailing_5d_sweep.cpp)
+target_include_directories(test_trailing_5d_sweep PRIVATE ../include)
+target_compile_features(test_trailing_5d_sweep PRIVATE cxx_std_17)
+target_compile_options(test_trailing_5d_sweep PRIVATE -O3)
+target_link_libraries(test_trailing_5d_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trailing_5d_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+# Multi-threaded parallel version
+add_executable(test_trailing_5d_parallel test_trailing_5d_parallel.cpp)
+target_include_directories(test_trailing_5d_parallel PRIVATE ../include)
+target_compile_features(test_trailing_5d_parallel PRIVATE cxx_std_17)
+target_compile_options(test_trailing_5d_parallel PRIVATE -O3)
+target_link_libraries(test_trailing_5d_parallel PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_trailing_5d_parallel PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+
+# Return Attribution Analysis
+add_executable(test_return_attribution
+    test_return_attribution.cpp
+)
+
+target_include_directories(test_return_attribution PRIVATE
+    ../include
+)
+
+target_compile_features(test_return_attribution PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_return_attribution PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_return_attribution PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_return_attribution PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_return_attribution PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Return attribution test configured: test_return_attribution")
+
+# Kill Switch Stress Test
+add_executable(test_kill_switch
+    test_kill_switch.cpp
+)
+
+target_include_directories(test_kill_switch PRIVATE
+    ../include
+)
+
+target_compile_features(test_kill_switch PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_kill_switch PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_kill_switch PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_kill_switch PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_kill_switch PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Kill switch stress test configured: test_kill_switch")
+
+# Kill Switch Real Data Test
+add_executable(test_kill_switch_real_data
+    test_kill_switch_real_data.cpp
+)
+
+target_include_directories(test_kill_switch_real_data PRIVATE
+    ../include
+)
+
+target_compile_features(test_kill_switch_real_data PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_kill_switch_real_data PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_kill_switch_real_data PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_kill_switch_real_data PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_kill_switch_real_data PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Kill switch real data test configured: test_kill_switch_real_data")
+
+# 7 Market-Parasitic Strategies Investigation
+add_executable(test_7_strategies
+    test_7_strategies.cpp
+)
+
+target_include_directories(test_7_strategies PRIVATE
+    ../include
+)
+
+target_compile_features(test_7_strategies PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_7_strategies PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_7_strategies PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_7_strategies PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_7_strategies PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "7 strategies investigation configured: test_7_strategies")
+
+# XAGUSD FillUpOscillation Parameter Sweep
+add_executable(test_xagusd_fillup
+    test_xagusd_fillup.cpp
+)
+
+target_include_directories(test_xagusd_fillup PRIVATE
+    ../include
+)
+
+target_compile_features(test_xagusd_fillup PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xagusd_fillup PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_fillup PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_fillup PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xagusd_fillup PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "XAGUSD FillUp sweep configured: test_xagusd_fillup")
+
+# DD Reduction Parameter Sweep (parameterized executable for parallel sweep)
+add_executable(test_dd_reduction
+    test_dd_reduction.cpp
+)
+
+target_include_directories(test_dd_reduction PRIVATE
+    ../include
+)
+
+target_compile_features(test_dd_reduction PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_dd_reduction PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_dd_reduction PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_dd_reduction PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_dd_reduction PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "DD Reduction sweep configured: test_dd_reduction")
+
+# XAGUSD FillUpStrategy Spacing Sweep (parallel)
+add_executable(test_xagusd_spacing_sweep
+    test_xagusd_spacing_sweep.cpp
+)
+
+target_include_directories(test_xagusd_spacing_sweep PRIVATE
+    ../include
+)
+
+target_compile_features(test_xagusd_spacing_sweep PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xagusd_spacing_sweep PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_spacing_sweep PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_spacing_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xagusd_spacing_sweep PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "XAGUSD spacing sweep configured: test_xagusd_spacing_sweep")
+
+add_executable(test_xagusd_sweep
+    test_xagusd_sweep.cpp
+)
+target_include_directories(test_xagusd_sweep PRIVATE
+    ../include
+)
+target_compile_features(test_xagusd_sweep PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(test_xagusd_sweep PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_sweep PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+set_target_properties(test_xagusd_sweep PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+message(STATUS "XAGUSD sweep configured: test_xagusd_sweep")
+
+add_executable(test_xagusd_pct_spacing
+    test_xagusd_pct_spacing.cpp
+)
+target_include_directories(test_xagusd_pct_spacing PRIVATE
+    ../include
+)
+target_compile_features(test_xagusd_pct_spacing PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(test_xagusd_pct_spacing PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_pct_spacing PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_pct_spacing PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+set_target_properties(test_xagusd_pct_spacing PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+add_executable(test_xauusd_ath_bands
+    test_xauusd_ath_bands.cpp
+)
+target_include_directories(test_xauusd_ath_bands PRIVATE
+    ../include
+)
+target_compile_features(test_xauusd_ath_bands PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(test_xauusd_ath_bands PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xauusd_ath_bands PRIVATE -Wall -Wextra -O3)
+endif()
+set_target_properties(test_xauusd_ath_bands PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+message(STATUS "XAUUSD ATH bands configured: test_xauusd_ath_bands")
+
+add_executable(test_xagusd_ath_bands
+    test_xagusd_ath_bands.cpp
+)
+target_include_directories(test_xagusd_ath_bands PRIVATE
+    ../include
+)
+target_compile_features(test_xagusd_ath_bands PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(test_xagusd_ath_bands PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_ath_bands PRIVATE -Wall -Wextra -O3)
+endif()
+set_target_properties(test_xagusd_ath_bands PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+message(STATUS "XAGUSD ATH bands configured: test_xagusd_ath_bands")
+
+add_executable(test_xagusd_diagnostic
+    test_xagusd_diagnostic.cpp
+)
+
+target_include_directories(test_xagusd_diagnostic PRIVATE
+    ../include
+)
+
+target_compile_features(test_xagusd_diagnostic PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xagusd_diagnostic PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_diagnostic PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_diagnostic PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xagusd_diagnostic PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+add_executable(test_xagusd_fixed
+    test_xagusd_fixed.cpp
+)
+
+target_include_directories(test_xagusd_fixed PRIVATE
+    ../include
+)
+
+target_compile_features(test_xagusd_fixed PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xagusd_fixed PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_fixed PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_fixed PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xagusd_fixed PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+add_executable(test_silver_precise
+    test_silver_precise.cpp
+)
+
+target_include_directories(test_silver_precise PRIVATE
+    ../include
+)
+
+target_compile_features(test_silver_precise PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_silver_precise PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_silver_precise PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_silver_precise PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_silver_precise PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+# Engine-based XAGUSD backtest with parallel sweep
+add_executable(test_engine_xagusd
+    test_engine_xagusd.cpp
+)
+
+target_include_directories(test_engine_xagusd PRIVATE
+    ../include
+)
+
+target_compile_features(test_engine_xagusd PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_engine_xagusd PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_engine_xagusd PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_engine_xagusd PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_engine_xagusd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+

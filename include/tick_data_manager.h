@@ -74,6 +74,11 @@ public:
     }
 
     // Get tick at specific index (requires memory mode)
+    // Access all loaded ticks (for sharing across parallel engines)
+    const std::vector<Tick>& GetAllTicks() const {
+        return ticks_;
+    }
+
     const Tick& GetTickAt(size_t index) const {
         if (!config_.load_all_into_memory) {
             throw std::runtime_error("GetTickAt() requires load_all_into_memory mode");
@@ -111,8 +116,9 @@ private:
     size_t total_ticks_loaded_;
 
     void Initialize() {
+        // Allow empty path when ticks will be fed externally via RunWithTicks
         if (config_.file_path.empty()) {
-            throw std::invalid_argument("Tick data file path is empty");
+            return;  // Skip initialization - external ticks will be used
         }
 
         if (config_.load_all_into_memory) {
@@ -179,18 +185,24 @@ private:
         std::string timestamp_str, bid_str, ask_str, volume_str, flags_str;
 
         // MT5 CSV format: TAB-delimited
-        // Format: Timestamp\tBid\tAsk\tVolume\tFlags
+        // Format: Timestamp\tBid\tAsk[\tVolume\tFlags]
+        // Volume and Flags are optional (some data exports don't include them)
         std::getline(ss, timestamp_str, '\t');
         std::getline(ss, bid_str, '\t');
         std::getline(ss, ask_str, '\t');
-        std::getline(ss, volume_str, '\t');
-        std::getline(ss, flags_str, '\t');
+        std::getline(ss, volume_str, '\t');  // Optional
+        std::getline(ss, flags_str, '\t');   // Optional
 
         try {
             tick.timestamp = timestamp_str;
             tick.bid = std::stod(bid_str);
             tick.ask = std::stod(ask_str);
-            tick.volume = std::stol(volume_str);
+            // Volume is optional - default to 0 if not provided
+            if (!volume_str.empty()) {
+                tick.volume = std::stol(volume_str);
+            } else {
+                tick.volume = 0;
+            }
             return true;
         } catch (const std::exception& e) {
             // Skip invalid lines
