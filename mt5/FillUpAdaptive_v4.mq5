@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Backtest Framework"
 #property link      ""
-#property version   "4.00"
+#property version   "4.30"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -19,8 +19,8 @@ input double MinVolume = 0.01;            // Minimum lot size
 input double MaxVolume = 100.0;           // Maximum lot size
 
 input group "=== Adaptive Spacing ==="
-input double VolatilityLookbackHours = 1.0;  // Volatility lookback (hours)
-input double TypicalVolPct = 0.45;           // Typical volatility (% of price) [XAGUSD 1h=0.45, 4h=0.97]
+input double VolatilityLookbackHours = 4.0;  // Volatility lookback (hours)
+input double TypicalVolPct = 0.55;           // Typical volatility (% of price)
 input double MinSpacingMult = 0.5;           // Min spacing multiplier
 input double MaxSpacingMult = 3.0;           // Max spacing multiplier
 input double MinSpacingPct = 0.05;           // Min absolute spacing (% of price)
@@ -63,6 +63,27 @@ double g_maxDrawdown;
 double g_maxDrawdownPct;
 datetime g_startTime;
 
+// Persistence
+datetime g_lastSaveTime;
+string g_stateFileName;
+
+// Per-tick cache (avoid redundant API calls)
+double g_tickBid;
+double g_tickAsk;
+double g_tickEquity;
+datetime g_tickTime;
+
+// Dashboard throttle
+datetime g_lastDashboardUpdate;
+
+// Cached position state (updated once per tick)
+int g_cachedPosCount;
+double g_cachedLowestBuy;
+double g_cachedHighestBuy;
+double g_cachedTotalVolume;
+double g_cachedUnrealizedPL;
+double g_cachedUsedMargin;
+
 //+------------------------------------------------------------------+
 //| Expert initialization                                             |
 //+------------------------------------------------------------------+
@@ -78,33 +99,52 @@ int OnInit()
     g_minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     g_maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
 
-    // Initialize adaptive spacing from current price
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    if(bid > 0)
+    // State file name unique per symbol + magic
+    g_stateFileName = "FillUp_v4_" + _Symbol + "_" + IntegerToString(MagicNumber) + ".state";
+    g_lastSaveTime = 0;
+
+    // Try to restore state from file
+    bool stateRestored = LoadState();
+
+    if(!stateRestored)
     {
-        g_currentSpacing = bid * (BaseSpacingPct / 100.0);
-        g_effectiveBase = g_currentSpacing;
+        // No valid saved state - initialize fresh
+        double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+        if(bid > 0)
+        {
+            g_currentSpacing = bid * (BaseSpacingPct / 100.0);
+            g_effectiveBase = g_currentSpacing;
+        }
+        else
+        {
+            g_currentSpacing = 1.0;
+            g_effectiveBase = 1.0;
+        }
+
+        g_recentHigh = 0;
+        g_recentLow = DBL_MAX;
+        g_lastVolatilityReset = 0;
+        g_spacingChanges = 0;
+        g_typicalVol = 0;
+        g_startTime = TimeCurrent();
+
+        // Try to reconstruct volatility from bar data
+        ReconstructVolatilityFromBars();
+
+        Print("State: Initialized fresh (no saved state found)");
     }
     else
     {
-        g_currentSpacing = 1.0;  // Fallback
-        g_effectiveBase = 1.0;
+        Print("State: Restored from file (", g_stateFileName, ")");
     }
 
-    g_recentHigh = 0;
-    g_recentLow = DBL_MAX;
-    g_lastVolatilityReset = 0;
-    g_spacingChanges = 0;
-    g_typicalVol = 0;
+    // Always reconstruct statistics from trade history
+    ReconstructStatistics();
 
-    // Initialize statistics
-    g_totalTrades = 0;
-    g_winningTrades = 0;
-    g_totalProfit = 0;
-    g_peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-    g_maxDrawdown = 0;
-    g_maxDrawdownPct = 0;
-    g_startTime = TimeCurrent();
+    // Initialize peak equity
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    if(equity > g_peakEquity)
+        g_peakEquity = equity;
 
     // Create dashboard
     if(ShowDashboard)
@@ -112,9 +152,13 @@ int OnInit()
         CreateDashboard();
     }
 
-    Print("=== FillUp Adaptive v4 Initialized ===");
-    Print("=== Percentage-Based Grid Spacing ===");
+    Print("=== FillUp Adaptive v4.3 Initialized ===");
+    Print("=== Restart-Safe + Pct-Based ===");
     PrintSymbolInfo();
+    Print("Current spacing: $", DoubleToString(g_currentSpacing, g_digits));
+    Print("Spacing changes: ", g_spacingChanges);
+    Print("Restored trades: ", g_totalTrades, " (", g_winningTrades, " wins)");
+    Print("Restored profit: $", DoubleToString(g_totalProfit, 2));
 
     return(INIT_SUCCEEDED);
 }
@@ -124,10 +168,13 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+    // Save state (may not execute on crash, but helps for clean shutdowns)
+    SaveState();
+
     // Remove dashboard objects
     ObjectsDeleteAll(0, "FillUp_");
 
-    Print("=== EA Stopped ===");
+    Print("=== EA Stopped (reason=", reason, ") ===");
     PrintStatistics();
 }
 
@@ -136,6 +183,15 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+    // Cache market data once per tick (avoid redundant API calls)
+    g_tickBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    g_tickAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    g_tickEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    g_tickTime = TimeCurrent();
+
+    // Single position scan - collect all needed data in one pass
+    ScanPositions();
+
     // Update volatility and spacing
     UpdateVolatility();
     UpdateAdaptiveSpacing();
@@ -143,25 +199,65 @@ void OnTick()
     // Update statistics
     UpdateStatistics();
 
-    // Update dashboard
-    if(ShowDashboard)
+    // Periodic state save (every 60 seconds)
+    if(g_tickTime - g_lastSaveTime >= 60)
+    {
+        SaveState();
+        g_lastSaveTime = g_tickTime;
+    }
+
+    // Dashboard throttle: update at most once per second
+    if(ShowDashboard && g_tickTime != g_lastDashboardUpdate)
     {
         UpdateDashboard();
+        g_lastDashboardUpdate = g_tickTime;
     }
 
     // Skip trading if disabled
     if(!EnableTrading) return;
 
-    // Get market data
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double spread = ask - bid;
+    // Determine if new position needed
+    double spread = g_tickAsk - g_tickBid;
+    bool shouldOpen = false;
 
-    // Analyze current positions
-    double lowestBuy = DBL_MAX;
-    double highestBuy = -DBL_MAX;
-    double totalVolume = 0;
-    int positionCount = 0;
+    if(g_cachedPosCount == 0)
+    {
+        shouldOpen = true;  // First position
+    }
+    else if(g_cachedLowestBuy >= g_tickAsk + g_currentSpacing)
+    {
+        shouldOpen = true;  // Price dropped - buy the dip
+    }
+    else if(g_cachedHighestBuy <= g_tickAsk - g_currentSpacing)
+    {
+        shouldOpen = true;  // Price rose - new higher entry
+    }
+
+    if(shouldOpen)
+    {
+        double lots = CalculateLotSize(g_tickAsk, g_cachedPosCount, g_cachedTotalVolume, g_cachedHighestBuy);
+        if(lots >= g_minLot)
+        {
+            if(OpenBuyOrder(lots, g_tickAsk, spread))
+            {
+                g_totalTrades++;
+                SaveState();  // Save after opening trade
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Single-pass position scanner (replaces multiple loops)            |
+//+------------------------------------------------------------------+
+void ScanPositions()
+{
+    g_cachedPosCount = 0;
+    g_cachedLowestBuy = DBL_MAX;
+    g_cachedHighestBuy = -DBL_MAX;
+    g_cachedTotalVolume = 0;
+    g_cachedUnrealizedPL = 0;
+    g_cachedUsedMargin = 0;
 
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
@@ -174,38 +270,12 @@ void OnTick()
                 double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
                 double lots = PositionGetDouble(POSITION_VOLUME);
 
-                lowestBuy = MathMin(lowestBuy, entryPrice);
-                highestBuy = MathMax(highestBuy, entryPrice);
-                totalVolume += lots;
-                positionCount++;
-            }
-        }
-    }
-
-    // Determine if new position needed
-    bool shouldOpen = false;
-
-    if(positionCount == 0)
-    {
-        shouldOpen = true;  // First position
-    }
-    else if(lowestBuy >= ask + g_currentSpacing)
-    {
-        shouldOpen = true;  // Price dropped - buy the dip
-    }
-    else if(highestBuy <= ask - g_currentSpacing)
-    {
-        shouldOpen = true;  // Price rose - new higher entry
-    }
-
-    if(shouldOpen)
-    {
-        double lots = CalculateLotSize(ask, positionCount, totalVolume, highestBuy);
-        if(lots >= g_minLot)
-        {
-            if(OpenBuyOrder(lots, ask, spread))
-            {
-                g_totalTrades++;
+                g_cachedLowestBuy = MathMin(g_cachedLowestBuy, entryPrice);
+                g_cachedHighestBuy = MathMax(g_cachedHighestBuy, entryPrice);
+                g_cachedTotalVolume += lots;
+                g_cachedUnrealizedPL += PositionGetDouble(POSITION_PROFIT);
+                g_cachedUsedMargin += lots * g_contractSize * entryPrice / g_leverage;
+                g_cachedPosCount++;
             }
         }
     }
@@ -245,23 +315,264 @@ void OnTrade()
 }
 
 //+------------------------------------------------------------------+
+//| Save state to file (called periodically + on events)             |
+//+------------------------------------------------------------------+
+void SaveState()
+{
+    if(MQLInfoInteger(MQL_TESTER) || MQLInfoInteger(MQL_OPTIMIZATION))
+        return;
+
+    int handle = FileOpen(g_stateFileName, FILE_WRITE | FILE_TXT | FILE_ANSI);
+    if(handle == INVALID_HANDLE)
+    {
+        return;  // Silent fail - will retry next time
+    }
+
+    FileWriteString(handle, "# FillUp v4 State File - DO NOT EDIT\n");
+    FileWriteString(handle, "version=4.1\n");
+    FileWriteString(handle, "symbol=" + _Symbol + "\n");
+    FileWriteString(handle, "magic=" + IntegerToString(MagicNumber) + "\n");
+    FileWriteString(handle, "savedAt=" + IntegerToString((long)TimeCurrent()) + "\n");
+
+    // Critical trading state
+    FileWriteString(handle, "currentSpacing=" + DoubleToString(g_currentSpacing, 8) + "\n");
+    FileWriteString(handle, "recentHigh=" + DoubleToString(g_recentHigh, 8) + "\n");
+    FileWriteString(handle, "recentLow=" + DoubleToString(g_recentLow, 8) + "\n");
+    FileWriteString(handle, "lastVolReset=" + IntegerToString((long)g_lastVolatilityReset) + "\n");
+    FileWriteString(handle, "spacingChanges=" + IntegerToString(g_spacingChanges) + "\n");
+    FileWriteString(handle, "typicalVol=" + DoubleToString(g_typicalVol, 8) + "\n");
+    FileWriteString(handle, "effectiveBase=" + DoubleToString(g_effectiveBase, 8) + "\n");
+
+    // Statistics
+    FileWriteString(handle, "peakEquity=" + DoubleToString(g_peakEquity, 2) + "\n");
+    FileWriteString(handle, "maxDrawdown=" + DoubleToString(g_maxDrawdown, 2) + "\n");
+    FileWriteString(handle, "maxDrawdownPct=" + DoubleToString(g_maxDrawdownPct, 2) + "\n");
+    FileWriteString(handle, "startTime=" + IntegerToString((long)g_startTime) + "\n");
+
+    FileClose(handle);
+}
+
+//+------------------------------------------------------------------+
+//| Load state from file                                              |
+//+------------------------------------------------------------------+
+bool LoadState()
+{
+    if(MQLInfoInteger(MQL_TESTER) || MQLInfoInteger(MQL_OPTIMIZATION))
+        return false;
+
+    if(!FileIsExist(g_stateFileName))
+        return false;
+
+    int handle = FileOpen(g_stateFileName, FILE_READ | FILE_TXT | FILE_ANSI);
+    if(handle == INVALID_HANDLE)
+        return false;
+
+    datetime savedAt = 0;
+    string savedSymbol = "";
+    int savedMagic = 0;
+    bool hasSpacing = false;
+
+    while(!FileIsEnding(handle))
+    {
+        string line = FileReadString(handle);
+        if(StringLen(line) == 0 || StringGetCharacter(line, 0) == '#')
+            continue;
+
+        // Parse key=value
+        int eqPos = StringFind(line, "=");
+        if(eqPos < 0) continue;
+
+        string key = StringSubstr(line, 0, eqPos);
+        string value = StringSubstr(line, eqPos + 1);
+
+        if(key == "symbol") savedSymbol = value;
+        else if(key == "magic") savedMagic = (int)StringToInteger(value);
+        else if(key == "savedAt") savedAt = (datetime)StringToInteger(value);
+        else if(key == "currentSpacing") { g_currentSpacing = StringToDouble(value); hasSpacing = true; }
+        else if(key == "recentHigh") g_recentHigh = StringToDouble(value);
+        else if(key == "recentLow") g_recentLow = StringToDouble(value);
+        else if(key == "lastVolReset") g_lastVolatilityReset = (datetime)StringToInteger(value);
+        else if(key == "spacingChanges") g_spacingChanges = (int)StringToInteger(value);
+        else if(key == "typicalVol") g_typicalVol = StringToDouble(value);
+        else if(key == "effectiveBase") g_effectiveBase = StringToDouble(value);
+        else if(key == "peakEquity") g_peakEquity = StringToDouble(value);
+        else if(key == "maxDrawdown") g_maxDrawdown = StringToDouble(value);
+        else if(key == "maxDrawdownPct") g_maxDrawdownPct = StringToDouble(value);
+        else if(key == "startTime") g_startTime = (datetime)StringToInteger(value);
+    }
+
+    FileClose(handle);
+
+    // Validate: must match symbol and magic
+    if(savedSymbol != _Symbol || savedMagic != MagicNumber)
+    {
+        Print("State file mismatch: symbol=", savedSymbol, " magic=", savedMagic);
+        return false;
+    }
+
+    // Validate: file must not be too old (max 7 days stale)
+    datetime now = TimeCurrent();
+    if(savedAt > 0 && now - savedAt > 7 * 24 * 3600)
+    {
+        Print("State file too old (", (now - savedAt) / 3600, " hours). Starting fresh.");
+        return false;
+    }
+
+    // If lookback window is stale, reconstruct it from bars
+    int lookbackSeconds = (int)(VolatilityLookbackHours * 3600);
+    if(savedAt > 0 && now - savedAt > lookbackSeconds)
+    {
+        Print("Lookback window stale (gap=", (now - savedAt) / 60, " min). Reconstructing from bars.");
+        ReconstructVolatilityFromBars();
+        // Keep other state (spacing, statistics)
+    }
+
+    return hasSpacing;
+}
+
+//+------------------------------------------------------------------+
+//| Reconstruct volatility window from recent bar data               |
+//+------------------------------------------------------------------+
+void ReconstructVolatilityFromBars()
+{
+    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    if(bid <= 0) return;
+
+    // Use M1 bars to reconstruct the lookback window
+    int barsNeeded = (int)(VolatilityLookbackHours * 60);  // 1 bar per minute
+    if(barsNeeded < 1) barsNeeded = 60;
+    if(barsNeeded > 1440) barsNeeded = 1440;  // Cap at 1 day
+
+    double high = 0;
+    double low = DBL_MAX;
+
+    // Get recent M1 bars
+    MqlRates rates[];
+    int copied = CopyRates(_Symbol, PERIOD_M1, 0, barsNeeded, rates);
+
+    if(copied > 0)
+    {
+        for(int i = 0; i < copied; i++)
+        {
+            high = MathMax(high, rates[i].high);
+            low = MathMin(low, rates[i].low);
+        }
+
+        g_recentHigh = high;
+        g_recentLow = low;
+        g_lastVolatilityReset = TimeCurrent();
+
+        Print("Reconstructed volatility from ", copied, " M1 bars: High=",
+              DoubleToString(high, g_digits), " Low=", DoubleToString(low, g_digits),
+              " Range=$", DoubleToString(high - low, g_digits));
+
+        // Recalculate spacing from reconstructed range
+        double range = high - low;
+        if(range > 0)
+        {
+            g_typicalVol = bid * (TypicalVolPct / 100.0);
+            g_effectiveBase = bid * (BaseSpacingPct / 100.0);
+            double volRatio = range / g_typicalVol;
+            volRatio = MathMax(MinSpacingMult, MathMin(MaxSpacingMult, volRatio));
+            double newSpacing = g_effectiveBase * volRatio;
+            double minAbs = bid * (MinSpacingPct / 100.0);
+            double maxAbs = bid * (MaxSpacingPct / 100.0);
+            g_currentSpacing = MathMax(minAbs, MathMin(maxAbs, newSpacing));
+        }
+    }
+    else
+    {
+        // No bar data available - use defaults
+        g_recentHigh = bid;
+        g_recentLow = bid;
+        g_lastVolatilityReset = TimeCurrent();
+        g_currentSpacing = bid * (BaseSpacingPct / 100.0);
+        Print("No bar data available. Using default spacing.");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Reconstruct statistics from trade history                         |
+//+------------------------------------------------------------------+
+void ReconstructStatistics()
+{
+    // Find earliest trade with our magic number
+    datetime earliest = TimeCurrent() - 365 * 24 * 3600;  // Look back 1 year max
+    if(g_startTime > 0 && g_startTime > earliest)
+        earliest = g_startTime;
+
+    if(!HistorySelect(earliest, TimeCurrent()))
+        return;
+
+    int totalTrades = 0;
+    int winningTrades = 0;
+    double totalProfit = 0;
+
+    for(int i = 0; i < HistoryDealsTotal(); i++)
+    {
+        ulong dealTicket = HistoryDealGetTicket(i);
+        if(dealTicket == 0) continue;
+
+        if(HistoryDealGetString(dealTicket, DEAL_SYMBOL) != _Symbol) continue;
+        if(HistoryDealGetInteger(dealTicket, DEAL_MAGIC) != MagicNumber) continue;
+
+        int entry = (int)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+
+        if(entry == DEAL_ENTRY_IN)
+        {
+            totalTrades++;
+            // Set start time from earliest trade if not already set
+            if(g_startTime == 0)
+            {
+                g_startTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+            }
+        }
+        else if(entry == DEAL_ENTRY_OUT)
+        {
+            double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT)
+                          + HistoryDealGetDouble(dealTicket, DEAL_SWAP)
+                          + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+            totalProfit += profit;
+            if(profit > 0) winningTrades++;
+        }
+    }
+
+    // Also count currently open positions
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol &&
+           PositionGetInteger(POSITION_MAGIC) == MagicNumber)
+        {
+            totalTrades++;
+        }
+    }
+
+    g_totalTrades = totalTrades;
+    g_winningTrades = winningTrades;
+    g_totalProfit = totalProfit;
+
+    if(g_startTime == 0)
+        g_startTime = TimeCurrent();
+}
+
+
+//+------------------------------------------------------------------+
 //| Update volatility tracking                                        |
 //+------------------------------------------------------------------+
 void UpdateVolatility()
 {
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    datetime currentTime = TimeCurrent();
     int lookbackSeconds = (int)(VolatilityLookbackHours * 3600);
 
-    if(g_lastVolatilityReset == 0 || currentTime - g_lastVolatilityReset >= lookbackSeconds)
+    if(g_lastVolatilityReset == 0 || g_tickTime - g_lastVolatilityReset >= lookbackSeconds)
     {
-        g_recentHigh = bid;
-        g_recentLow = bid;
-        g_lastVolatilityReset = currentTime;
+        g_recentHigh = g_tickBid;
+        g_recentLow = g_tickBid;
+        g_lastVolatilityReset = g_tickTime;
     }
 
-    g_recentHigh = MathMax(g_recentHigh, bid);
-    g_recentLow = MathMin(g_recentLow, bid);
+    g_recentHigh = MathMax(g_recentHigh, g_tickBid);
+    g_recentLow = MathMin(g_recentLow, g_tickBid);
 }
 
 //+------------------------------------------------------------------+
@@ -269,17 +580,16 @@ void UpdateVolatility()
 //+------------------------------------------------------------------+
 void UpdateAdaptiveSpacing()
 {
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     double range = g_recentHigh - g_recentLow;
 
-    if(range > 0 && g_recentHigh > 0 && bid > 0)
+    if(range > 0 && g_recentHigh > 0 && g_tickBid > 0)
     {
         // All parameters scale with current price
-        g_typicalVol = bid * (TypicalVolPct / 100.0);
-        g_effectiveBase = bid * (BaseSpacingPct / 100.0);
-        double minAbs = bid * (MinSpacingPct / 100.0);
-        double maxAbs = bid * (MaxSpacingPct / 100.0);
-        double changeThresh = bid * (SpacingChangeThresholdPct / 100.0);
+        g_typicalVol = g_tickBid * (TypicalVolPct / 100.0);
+        g_effectiveBase = g_tickBid * (BaseSpacingPct / 100.0);
+        double minAbs = g_tickBid * (MinSpacingPct / 100.0);
+        double maxAbs = g_tickBid * (MaxSpacingPct / 100.0);
+        double changeThresh = g_tickBid * (SpacingChangeThresholdPct / 100.0);
 
         // Calculate vol ratio and clamp to multiplier range
         double volRatio = range / g_typicalVol;
@@ -303,14 +613,12 @@ void UpdateAdaptiveSpacing()
 //+------------------------------------------------------------------+
 void UpdateStatistics()
 {
-    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-
-    if(equity > g_peakEquity)
+    if(g_tickEquity > g_peakEquity)
     {
-        g_peakEquity = equity;
+        g_peakEquity = g_tickEquity;
     }
 
-    double drawdown = g_peakEquity - equity;
+    double drawdown = g_peakEquity - g_tickEquity;
     double drawdownPct = (g_peakEquity > 0) ? (drawdown / g_peakEquity * 100) : 0;
 
     if(drawdown > g_maxDrawdown)
@@ -326,21 +634,8 @@ void UpdateStatistics()
 double CalculateLotSize(double currentAsk, int positionsTotal,
                         double volumeOfOpenTrades, double highestBuy)
 {
-    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-
-    // Calculate used margin
-    double usedMargin = 0;
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
-    {
-        ulong ticket = PositionGetTicket(i);
-        if(ticket > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol &&
-           PositionGetInteger(POSITION_MAGIC) == MagicNumber)
-        {
-            double lots = PositionGetDouble(POSITION_VOLUME);
-            double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-            usedMargin += lots * g_contractSize * entryPrice / g_leverage;
-        }
-    }
+    // Use cached values (no redundant API calls or position loops)
+    double usedMargin = g_cachedUsedMargin;
 
     // Calculate worst-case price
     double endPrice = (positionsTotal == 0)
@@ -352,7 +647,7 @@ double CalculateLotSize(double currentAsk, int positionsTotal,
     if(numberOfTrades <= 0) numberOfTrades = 1;
 
     // Potential equity at worst case
-    double equityAtTarget = equity - volumeOfOpenTrades * distance * g_contractSize;
+    double equityAtTarget = g_tickEquity - volumeOfOpenTrades * distance * g_contractSize;
 
     // Margin stop-out check (20% level)
     double marginStopOut = 20.0;
@@ -362,23 +657,53 @@ double CalculateLotSize(double currentAsk, int positionsTotal,
     }
 
     // Calculate lot size using triangular position sizing
-    double tradeSize = MinVolume;
-    double dEquity = g_contractSize * tradeSize * g_currentSpacing *
-                     (numberOfTrades * (numberOfTrades + 1) / 2);
-    double dMargin = numberOfTrades * tradeSize * g_contractSize / g_leverage;
+    // Solve analytically: find max mult where (equityAtTarget - mult*dEquity) / (usedMargin + mult*dMargin) > stopOut/100
+    double dEquityUnit = g_contractSize * MinVolume * g_currentSpacing *
+                         (numberOfTrades * (numberOfTrades + 1) / 2);
+    double dMarginUnit = numberOfTrades * MinVolume * g_contractSize / g_leverage;
+    double stopOutFrac = marginStopOut / 100.0;
 
     double maxMult = MaxVolume / MinVolume;
-    for(double mult = maxMult; mult >= 1.0; mult -= 0.1)
-    {
-        double testEquity = equityAtTarget - mult * dEquity;
-        double testMargin = usedMargin + mult * dMargin;
+    double mult = 1.0;
 
-        if(testMargin > 0 && (testEquity / testMargin * 100.0) > marginStopOut)
+    if(dMarginUnit > 0)
+    {
+        double numerator = equityAtTarget - stopOutFrac * usedMargin;
+        double denominator = dEquityUnit + stopOutFrac * dMarginUnit;
+
+        if(denominator > 0 && numerator > 0)
         {
-            tradeSize = mult * MinVolume;
-            break;
+            mult = numerator / denominator;
+            mult = MathMin(mult, maxMult);
+        }
+        else if(numerator <= 0)
+        {
+            return 0.0;
+        }
+        else
+        {
+            mult = maxMult;
         }
     }
+    else
+    {
+        if(dEquityUnit > 0)
+        {
+            mult = equityAtTarget / dEquityUnit;
+            mult = MathMin(mult, maxMult);
+        }
+        else
+        {
+            mult = maxMult;
+        }
+    }
+
+    // Match C++ behavior: if full-grid survival requires sub-minimum lots,
+    // still open at minimum. The full grid rarely fills completely; positions
+    // close via TP during oscillations. Engine margin stop-out protects worst case.
+    mult = MathMax(1.0, mult);
+
+    double tradeSize = mult * MinVolume;
 
     // Normalize to lot step
     tradeSize = MathFloor(tradeSize / g_lotStep) * g_lotStep;
@@ -406,7 +731,7 @@ bool OpenBuyOrder(double lots, double ask, double spread)
     request.tp = tp;
     request.deviation = 10;
     request.magic = MagicNumber;
-    request.comment = "FillUp v4 " + DoubleToString(BaseSpacingPct, 1) + "%";
+    request.comment = "FillUp v4 " + DoubleToString(BaseSpacingPct, 2) + "%";
     request.type_filling = ORDER_FILLING_IOC;
 
     if(!OrderSend(request, result))
@@ -448,8 +773,8 @@ void CreateDashboard()
     ObjectSetInteger(0, "FillUp_BG", OBJPROP_CORNER, CORNER_LEFT_UPPER);
 
     // Title
-    CreateLabel("FillUp_Title", x + 10, y + 10, "FillUp Adaptive v4", clrGold, 12);
-    CreateLabel("FillUp_Sub", x + 10, y + 28, "%-Based Grid Spacing", clrDarkGray, 8);
+    CreateLabel("FillUp_Title", x + 10, y + 10, "FillUp Adaptive v4.3", clrGold, 12);
+    CreateLabel("FillUp_Sub", x + 10, y + 28, "%-Based | Restart-Safe", clrDarkGray, 8);
 
     // Labels
     int lineHeight = 18;
@@ -523,43 +848,26 @@ void CreateLabel(string name, int x, int y, string text, color clr, int fontSize
 //+------------------------------------------------------------------+
 void UpdateDashboard()
 {
-    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double drawdown = g_peakEquity - equity;
+    // All values from per-tick cache (no API calls or position loops)
+    double drawdown = g_peakEquity - g_tickEquity;
     double drawdownPct = (g_peakEquity > 0) ? (drawdown / g_peakEquity * 100) : 0;
     double range = g_recentHigh - g_recentLow;
-    double spacingPct = (bid > 0) ? (g_currentSpacing / bid * 100.0) : 0;
-
-    // Get position info
-    int posCount = 0;
-    double totalVol = 0;
-    double unrealizedPL = 0;
-
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
-    {
-        ulong ticket = PositionGetTicket(i);
-        if(ticket > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol &&
-           PositionGetInteger(POSITION_MAGIC) == MagicNumber)
-        {
-            posCount++;
-            totalVol += PositionGetDouble(POSITION_VOLUME);
-            unrealizedPL += PositionGetDouble(POSITION_PROFIT);
-        }
-    }
+    double spacingPct = (g_tickBid > 0) ? (g_currentSpacing / g_tickBid * 100.0) : 0;
 
     // Update labels
     ObjectSetString(0, "FillUp_V1", OBJPROP_TEXT, "$" + DoubleToString(g_currentSpacing, g_digits));
-    ObjectSetString(0, "FillUp_V13", OBJPROP_TEXT, DoubleToString(spacingPct, 3) + "%");
-    ObjectSetString(0, "FillUp_V2", OBJPROP_TEXT, "$" + DoubleToString(range, 2));
-    ObjectSetString(0, "FillUp_V12", OBJPROP_TEXT, "$" + DoubleToString(g_typicalVol, 2));
-    ObjectSetString(0, "FillUp_V3", OBJPROP_TEXT, IntegerToString(posCount));
-    ObjectSetString(0, "FillUp_V4", OBJPROP_TEXT, DoubleToString(totalVol, 2) + " lots");
+    ObjectSetString(0, "FillUp_V13", OBJPROP_TEXT, DoubleToString(spacingPct, 3) + "% [base:" + DoubleToString(BaseSpacingPct, 2) + "%]");
+    ObjectSetString(0, "FillUp_V2", OBJPROP_TEXT, "$" + DoubleToString(range, 2) +
+                    " /" + DoubleToString(VolatilityLookbackHours, 1) + "h");
+    ObjectSetString(0, "FillUp_V12", OBJPROP_TEXT, DoubleToString(TypicalVolPct, 3) + "%");
+    ObjectSetString(0, "FillUp_V3", OBJPROP_TEXT, IntegerToString(g_cachedPosCount));
+    ObjectSetString(0, "FillUp_V4", OBJPROP_TEXT, DoubleToString(g_cachedTotalVolume, 2) + " lots");
 
     // Unrealized P/L with color
-    ObjectSetString(0, "FillUp_V5", OBJPROP_TEXT, "$" + DoubleToString(unrealizedPL, 2));
-    ObjectSetInteger(0, "FillUp_V5", OBJPROP_COLOR, unrealizedPL >= 0 ? clrLime : clrRed);
+    ObjectSetString(0, "FillUp_V5", OBJPROP_TEXT, "$" + DoubleToString(g_cachedUnrealizedPL, 2));
+    ObjectSetInteger(0, "FillUp_V5", OBJPROP_COLOR, g_cachedUnrealizedPL >= 0 ? clrLime : clrRed);
 
-    ObjectSetString(0, "FillUp_V6", OBJPROP_TEXT, "$" + DoubleToString(equity, 2));
+    ObjectSetString(0, "FillUp_V6", OBJPROP_TEXT, "$" + DoubleToString(g_tickEquity, 2));
     ObjectSetString(0, "FillUp_V7", OBJPROP_TEXT, DoubleToString(drawdownPct, 1) + "%");
     ObjectSetString(0, "FillUp_V8", OBJPROP_TEXT, DoubleToString(g_maxDrawdownPct, 1) + "%");
     ObjectSetString(0, "FillUp_V9", OBJPROP_TEXT, IntegerToString(g_totalTrades));
@@ -589,7 +897,8 @@ void PrintSymbolInfo()
     Print("Max Lot: ", g_maxLot);
     Print("---");
     Print("Survive %: ", SurvivePct);
-    Print("Base Spacing: ", BaseSpacingPct, "% of price");
+    Print("Base Spacing: ", BaseSpacingPct, "% of price (",
+          DoubleToString(SurvivePct / BaseSpacingPct, 0), " grid levels)");
     Print("  At current price $", DoubleToString(bid, g_digits),
           " = $", DoubleToString(bid * BaseSpacingPct / 100.0, g_digits));
     Print("Lookback: ", VolatilityLookbackHours, " hours");

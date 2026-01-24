@@ -1,17 +1,18 @@
 ; FillUpAdaptive v4 - XAGUSD Conservative Configuration
-; Backtest: 34.1x return, 28.7% max DD, 356 trades
-; Period: 2025.01.02 - 2026.01.24, $10k initial, 1:500 leverage
-; Higher survive for more safety margin
+; Optimized on 2024 data (+21.5%), forward-tested on 2025 bull (+146%)
+; 2024: 1.37x return, 25.3% max DD, consistency=0.96
+; 2025: 1.96x return, 20.2% max DD, consistency=0.68
+; Lowest drawdown of all validated configs
 
 ; === Core Strategy Parameters ===
-SurvivePct=20.0
+SurvivePct=35.0
 BaseSpacingPct=2.0
 MinVolume=0.01
 MaxVolume=100.0
 
 ; === Adaptive Spacing ===
 VolatilityLookbackHours=1.0
-TypicalVolPct=0.45
+TypicalVolPct=1.0
 MinSpacingMult=0.5
 MaxSpacingMult=3.0
 MinSpacingPct=0.05
@@ -21,4 +22,4 @@ SpacingChangeThresholdPct=0.2
 ; === Display & Safety ===
 ShowDashboard=true
 EnableTrading=true
-MagicNumber=123458
+MagicNumber=123460

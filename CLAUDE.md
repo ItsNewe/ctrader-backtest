@@ -862,3 +862,315 @@ At $96 silver with 2.0% spacing:
 | 8. Multi-instrument | `test_domain8_multi_instrument.cpp` | NAS100 needs recalibration |
 | 9. Capital allocation | `test_domain9_capital_allocation.cpp` | 50% optimal |
 | 10. Correlation | `test_domain10_correlation.cpp` | No correlations found |
+
+---
+
+## 13. XAUUSD Parameter Selection Methodology (Reproducible)
+
+This section documents the complete process used to find optimal XAUUSD parameters. Follow these steps in order to reproduce the process for a new instrument, time period, or broker.
+
+### Overview: The 6-Step Process
+
+```
+1. MEASURE    → Oscillation characteristics + volatility ranges
+2. SWEEP      → Parametric grid across survive/spacing/lookback
+3. VALIDATE   → H1/H2 split (anti-overfitting)
+4. STRESS     → Multi-year regime robustness
+5. REFINE     → Spacing optimization for adaptive mode
+6. CONFIRM    → Parameter stability neighborhood check
+```
+
+---
+
+### Step 1: Measure Oscillation Characteristics
+
+**Purpose**: Understand how the instrument moves — amplitude, frequency, asymmetry.
+
+**Script**: `validation/test_domain1_oscillation_characterization.cpp`
+
+**Method**:
+1. Load full-year tick data into memory (51.7M ticks for XAUUSD 2025)
+2. Detect swing highs/lows using minimum threshold ($1.00 for gold)
+3. Record: amplitude, duration, direction for each oscillation
+4. Compute distributions at multiple scales (0.05%, 0.15%, 0.50% of price)
+
+**Key outputs needed**:
+- Median oscillation amplitude (stable at ~$1.00 for XAUUSD regardless of daily range)
+- Oscillation count per year (281k in 2025, 92k in 2024)
+- Duration distribution (91.4% resolve in <5 minutes)
+- Downswing vs upswing speed asymmetry (down is 17-33% faster)
+
+**Why this matters**: The median oscillation amplitude determines the "natural" grid spacing. If median swing is $1.00, spacing near $1.50 captures most reversals with one grid level of profit. Too tight (<$0.50) means excessive trades and swap. Too wide (>$3.00) means missing most oscillations.
+
+---
+
+### Step 2: Measure Volatility for Adaptive Spacing
+
+**Purpose**: Determine TypicalVolPct — the expected price range over the lookback window.
+
+**Script**: `validation/test_xagusd_vol.cpp` (same methodology applies to XAUUSD)
+
+**Method**:
+1. Stream through all ticks, tracking high/low over rolling windows
+2. Reset window every N hours (test both 1h and 4h)
+3. Record the range (high - low) at each reset
+4. Compute: mean, median, P25, P75, P90 of ranges as % of price
+
+**XAUUSD 2025 results**:
+
+| Window | Mean | Median | P25 | P75 | P90 |
+|--------|------|--------|-----|-----|-----|
+| 1-hour | 0.37% | 0.27% | 0.18% | 0.44% | 0.68% |
+| 4-hour | 0.72% | 0.55% | 0.37% | 0.87% | 1.32% |
+
+**Parameter selection rule**: TypicalVolPct = **median range** for the chosen lookback window.
+- If lookback = 4h → TypicalVolPct = 0.55%
+- If lookback = 1h → TypicalVolPct = 0.27%
+
+**Why median**: The adaptive spacing divides observed range by typical_vol to get a ratio. When range = typical (ratio=1.0), spacing = base_spacing. When range > typical (high vol), spacing widens. When range < typical (quiet), spacing tightens. Using median ensures ratio=1.0 is the "normal" condition.
+
+---
+
+### Step 3: Parameter Sweep
+
+**Purpose**: Find optimal combination of survive_pct, base_spacing, lookback.
+
+**Script**: `validation/test_parameter_stability.cpp`
+
+**Sweep grid**:
+```
+survive_pct:   [10, 13, 15, 18, 20]        # 5 values
+base_spacing:  [1.0, 1.5, 2.0, 2.5]        # 4 values (absolute $ for C++ backtest)
+lookback:      [1, 2, 4, 8]                 # 4 values (hours)
+─────────────────────────────────────────
+Total:         80 configurations
+```
+
+**For percentage-based EA** (v4), translate base_spacing to BaseSpacingPct:
+- At XAUUSD $2,700 (Jan 2025): $1.50 ÷ $2,700 = 0.055% → BaseSpacingPct ≈ 0.06
+- At XAUUSD $3,500 (mid 2025): $1.50 ÷ $3,500 = 0.043%
+- For consistent behavior across price levels, use the C++ absolute spacing in the backtest
+
+**Infrastructure**: Use parallel sweep pattern (Section 6b):
+1. Load ticks once into shared memory (~60s)
+2. 16 threads process 80 configs (~5s total)
+3. Collect: return multiple, max DD, trade count, Sharpe ratio, swap cost
+
+**Selection criteria** (in priority order):
+1. **Must survive**: No margin stop-out (eliminates survive < 13% for XAUUSD)
+2. **Best risk-adjusted return**: Sharpe ratio (return / DD)
+3. **Trade count > 5,000**: Statistical significance
+4. **Reasonable DD**: Prefer < 70% max DD for practical deployment
+
+**XAUUSD 2025 results** (top configs):
+
+| survive | spacing | lookback | Return | MaxDD | Sharpe | Status |
+|---------|---------|----------|--------|-------|--------|--------|
+| 13% | $1.50 | 4h | 6.57x | 66.9% | 11.39 | SELECTED |
+| 13% | $1.50 | 2h | 6.32x | 67.1% | 10.8 | viable |
+| 13% | $1.00 | 4h | 7.12x | 72.4% | 9.2 | too risky |
+| 15% | $1.50 | 4h | 5.81x | 60.2% | 10.5 | conservative |
+| 18% | $2.00 | 4h | 3.31x | 54.8% | 7.1 | too conservative |
+| 10% | any | any | STOP-OUT | - | - | ELIMINATED |
+
+---
+
+### Step 4: Out-of-Sample Validation (H1/H2 Split)
+
+**Purpose**: Detect overfitting. If parameters only work on the period they were optimized on, they'll fail live.
+
+**Script**: `validation/test_h1h2_validation.cpp`
+
+**Method**:
+1. Run best config on H1 only (Jan-Jun): Record return, DD
+2. Run best config on H2 only (Jul-Dec): Record return, DD
+3. Calculate H1/H2 ratio of returns
+4. Check both halves survive independently
+
+**Pass criteria**:
+- Both halves must end with balance > 10% of start (survival)
+- H1/H2 return ratio must be in range [0.33, 3.0]
+- Ideal ratio is 1.0 (equal performance in both halves)
+
+**XAUUSD results** (survive=13, spacing=$1.50, lookback=4h):
+- H1: 2.54x return, ~66% DD → PASS
+- H2: 2.65x return, ~67% DD → PASS
+- Ratio: 0.96 → PASS (near-perfect consistency)
+- Full year: 2.54 × 2.65 ≈ 6.57x (compounds)
+
+**Counter-example** (MomentumReversal filter, 180 configs tested):
+- H1: Various returns, some good
+- H2: 0% survival across ALL configs → FAIL (pure overfitting)
+
+**Why this works**: Overfitted parameters exploit specific price patterns in the training period. By requiring both halves to perform, you ensure the strategy captures a general market property (oscillation), not a specific sequence.
+
+---
+
+### Step 5: Multi-Year Regime Robustness
+
+**Purpose**: Verify the strategy isn't just exploiting one year's market conditions.
+
+**Script**: `validation/test_multi_year.cpp`
+
+**Method**:
+1. Run on 2024 data (lower oscillation, ~92k swings, moderate trend)
+2. Run on 2025 data (high oscillation, ~281k swings, strong bull)
+3. Run sequentially: Start with 2024, carry balance into 2025
+4. Compare performance ratio to oscillation ratio
+
+**Expected**: Performance should scale with oscillation count, not be period-specific.
+
+**Results**:
+| Year | Oscillations | Return | DD | Performance/Oscillation |
+|------|-------------|--------|-----|-------------------------|
+| 2024 | 92,000 | 2.10x | 43% | 2.28e-5 per oscillation |
+| 2025 | 281,000 | 6.59x | 67% | 2.35e-5 per oscillation |
+
+Ratio: Performance scales linearly with oscillation count (within 3%). This confirms the strategy captures a structural market property.
+
+**Red flags to watch for**:
+- Year 2 return < 0.5x Year 1 (strategy may have stopped working)
+- Max DD in Year 2 >> Year 1 (increased risk without increased return)
+- Inconsistent performance/oscillation ratio (overfitting to regime)
+
+---
+
+### Step 6: Parameter Stability (Neighborhood Check)
+
+**Purpose**: Ensure the selected parameters aren't a fragile local optimum.
+
+**Method** (within the 80-config sweep):
+1. Take the selected config: survive=13, spacing=$1.50, lookback=4h
+2. Check all configs that differ by ±1 parameter step
+3. Measure return variance across this neighborhood
+
+**Neighborhood of (13, $1.50, 4h)**:
+- (13, $1.50, 2h): 6.32x → -3.8% vs baseline
+- (13, $1.50, 8h): 6.05x → -7.9%
+- (13, $1.00, 4h): 7.12x → +8.4%
+- (13, $2.00, 4h): 5.21x → -20.7%
+- (15, $1.50, 4h): 5.81x → -11.6%
+
+**Pass criterion**: No neighboring config should differ by >50% in return. All neighbors above are within 21%, indicating a broad optimum rather than a sharp peak.
+
+**Sharp peak = overfitting**: If one config gives 6.57x but all neighbors give <2x, the parameter is exploiting noise.
+
+---
+
+### Step 7: Validate Against Dead Ends
+
+**Purpose**: Confirm that attempted improvements don't help (the baseline is truly optimal).
+
+**Tests performed** (all FAILED to improve baseline):
+- Entry filters (MomentumReversal): Overfit, 0% H2 survival
+- Exit timing (4h time exit): Kills profitable positions, 1.32x
+- DD reduction (pause/cap/stop): -38% return per -14% DD saved
+- Trailing stops (768 configs): No config beats TP = spread + spacing
+- Position sizing variations: Marginal benefit, added complexity
+- Auto-calibration (lookback+typvol): -6% to -47% vs manual tuning
+
+**Conclusion**: The 3-parameter model (survive, spacing, lookback) with ADAPTIVE_SPACING is the correct complexity level. Adding parameters causes overfitting or negligible improvement.
+
+---
+
+### Translating C++ Parameters to EA v4 (Percentage-Based)
+
+The C++ backtest uses absolute dollar values. The v4 EA uses percentage of price. Translation:
+
+```
+BaseSpacingPct = (base_spacing_dollars / reference_price) × 100
+
+For XAUUSD at ~$2,700 (Jan 2025 start):
+  $1.50 / $2,700 × 100 = 0.055% → use 0.06%
+
+For XAUUSD at ~$3,500 (mid 2025):
+  $1.50 / $3,500 × 100 = 0.043%
+```
+
+**Important**: The EA's percentage-based spacing automatically adapts to price level. At $2,700 with BaseSpacingPct=0.06, effective spacing = $1.62. At $3,500, effective spacing = $2.10. This handles price drift without manual adjustment — the same feature that makes XAGUSD work despite tripling from $29 to $96.
+
+The EA's TypicalVolPct and VolatilityLookbackHours translate directly (same values as C++ adaptive config).
+
+---
+
+### Reproducing for a New Instrument
+
+To find parameters for a new instrument (e.g., EURUSD, NAS100):
+
+1. **Get tick data**: Full year minimum, ideally 2+ years
+2. **Measure oscillations** (Step 1): Find median amplitude — this suggests base_spacing
+3. **Measure volatility** (Step 2): Find median 1h and 4h ranges as % of price
+4. **Determine survive_pct**: Must exceed the maximum observed adverse move in data
+   - Measure: largest peak-to-trough move in the dataset
+   - Add safety margin: survive = max_adverse × 1.2 (minimum)
+5. **Run sweep** (Step 3): Grid around estimated values
+6. **Validate** (Steps 4-6): H1/H2 split, multi-year if data available, neighborhood check
+
+**Known results for other instruments**:
+- XAGUSD: survive=19%, BaseSpacingPct=2.0%, lookback=1h, TypicalVolPct=0.45%
+- USDJPY: Does NOT work (insufficient oscillation, swap dominates)
+- NAS100: Needs recalibration (different characteristics from forex/metals)
+
+---
+
+### Auto-Calibration: Tested and Rejected
+
+An auto-calibration approach was tested where TypicalVolPct and VolatilityLookbackHours would self-tune from historical bar data using M1 bars and swing detection.
+
+**Script**: `validation/test_auto_calibration.cpp`
+
+**Results (XAUUSD 2025)**:
+
+| Config | Return | vs Manual | Verdict |
+|--------|--------|-----------|---------|
+| MANUAL_ALL (baseline) | 10.61x | — | Best |
+| AUTO_LOOKBACK+TYPVOL | 9.96x | -6% | Acceptable but worse |
+| AUTO_LOOKBACK alone | 5.79x | -45% | Dangerous (85% DD) |
+| AUTO_SPACING alone | 6.80x | -36% | Significant loss |
+| AUTO_ALL | 5.65x | -47% | Unacceptable |
+
+**Why it fails**: Auto-calibration uses early data to set parameters, but early data doesn't represent the full year. Lookback and TypVol are mathematically coupled — changing one without the other causes misalignment. Manual tuning on historical data consistently outperforms.
+
+**Conclusion**: Use manual parameters tuned via the sweep methodology above. The 30 minutes to run the sweep produces better parameters than any auto-calibration scheme tested.
+
+---
+
+### Quick Reference: Final XAUUSD Parameters
+
+```
+Strategy: FillUpOscillation, ADAPTIVE_SPACING mode
+─────────────────────────────────────────────────
+survive_pct              = 13.0%    [Exceeds max adverse move 11-12%]
+base_spacing             = $1.50    [Near median oscillation amplitude]
+volatility_lookback      = 4 hours  [Stable, avoids noise]
+typical_vol_pct          = 0.55%    [Measured 4h median range]
+min_spacing_mult         = 0.5      [Floor: half of base in quiet markets]
+max_spacing_mult         = 3.0      [Ceiling: 3x base in volatile markets]
+min_volume               = 0.01
+max_volume               = 10.0
+contract_size            = 100.0
+leverage                 = 500
+
+EA v4 equivalents:
+  SurvivePct             = 13.0
+  BaseSpacingPct         = 0.06     [$1.50 / $2,700 reference price]
+  VolatilityLookbackHours= 4.0
+  TypicalVolPct          = 0.55
+  MinSpacingMult         = 0.5
+  MaxSpacingMult         = 3.0
+  MinSpacingPct          = 0.005
+  MaxSpacingPct          = 1.0
+  SpacingChangeThresholdPct = 0.01
+```
+
+### Validation Summary
+
+| Check | Criterion | Result | Status |
+|-------|-----------|--------|--------|
+| Survival | No stop-out | 66.9% max DD, survived | PASS |
+| H1/H2 split | Ratio 0.33-3.0 | 0.96 | PASS |
+| Multi-year | Both years profitable | 2.10x (2024), 6.59x (2025) | PASS |
+| Stability | Neighbors <50% variance | Max 21% variance | PASS |
+| Trade count | >5,000 | 10,334 | PASS |
+| Improvements | None beat baseline | All tested failed | PASS |
+| Risk of ruin | <1% (Monte Carlo) | 0.10% | PASS |

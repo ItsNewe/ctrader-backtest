@@ -1,7 +1,6 @@
 ; FillUpAdaptive v4 - XAUUSD Balanced Configuration
 ; Backtest: 10.4x return, 69.6% max DD, 49430 trades
 ; Period: 2025.01.01 - 2025.12.29, $10k initial, 1:500 leverage
-; Measured XAUUSD 4h median range: 0.55%
 
 ; === Core Strategy Parameters ===
 SurvivePct=13.0

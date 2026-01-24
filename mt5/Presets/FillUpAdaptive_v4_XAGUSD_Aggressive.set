@@ -1,17 +1,18 @@
 ; FillUpAdaptive v4 - XAGUSD Aggressive Configuration
-; Backtest: 115.2x return, 36.9% max DD, 356 trades
-; Period: 2025.01.02 - 2026.01.24, $10k initial, 1:500 leverage
-; WARNING: survive=18% is near max adverse move (~17% in 2025)
+; Optimized on 2024 data (+21.5%), forward-tested on 2025 bull (+146%)
+; 2024: 2.05x return, 47.2% max DD, consistency=0.96
+; 2025: 4.72x return, 37.7% max DD, consistency=0.64
+; Highest return while still passing all validation criteria
 
 ; === Core Strategy Parameters ===
-SurvivePct=18.0
-BaseSpacingPct=2.0
+SurvivePct=25.0
+BaseSpacingPct=1.0
 MinVolume=0.01
 MaxVolume=100.0
 
 ; === Adaptive Spacing ===
-VolatilityLookbackHours=1.0
-TypicalVolPct=0.45
+VolatilityLookbackHours=4.0
+TypicalVolPct=1.0
 MinSpacingMult=0.5
 MaxSpacingMult=3.0
 MinSpacingPct=0.05
@@ -21,4 +22,4 @@ SpacingChangeThresholdPct=0.2
 ; === Display & Safety ===
 ShowDashboard=true
 EnableTrading=true
-MagicNumber=123458
+MagicNumber=123459

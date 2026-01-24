@@ -1919,3 +1919,108 @@ set_target_properties(test_engine_xagusd PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
 )
 
+add_executable(test_preset_overfitting
+    test_preset_overfitting.cpp
+)
+
+target_include_directories(test_preset_overfitting PRIVATE
+    ../include
+)
+
+target_compile_features(test_preset_overfitting PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_preset_overfitting PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_preset_overfitting PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_preset_overfitting PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_preset_overfitting PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+add_executable(test_xagusd_consistency
+    test_xagusd_consistency.cpp
+)
+
+target_include_directories(test_xagusd_consistency PRIVATE
+    ../include
+)
+
+target_compile_features(test_xagusd_consistency PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xagusd_consistency PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_consistency PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_consistency PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xagusd_consistency PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+add_executable(test_xagusd_compound_cap
+    test_xagusd_compound_cap.cpp
+)
+
+target_include_directories(test_xagusd_compound_cap PRIVATE
+    ../include
+)
+
+target_compile_features(test_xagusd_compound_cap PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xagusd_compound_cap PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_compound_cap PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_compound_cap PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xagusd_compound_cap PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+add_executable(test_xagusd_2024_optimize
+    test_xagusd_2024_optimize.cpp
+)
+
+target_include_directories(test_xagusd_2024_optimize PRIVATE
+    ../include
+)
+
+target_compile_features(test_xagusd_2024_optimize PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xagusd_2024_optimize PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xagusd_2024_optimize PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xagusd_2024_optimize PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xagusd_2024_optimize PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+# Auto-calibration validation (XAUUSD, parallel)
+add_executable(test_auto_calibration
+    test_auto_calibration.cpp
+)
+
+target_include_directories(test_auto_calibration PRIVATE
+    ../include
+)
+
+target_compile_features(test_auto_calibration PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_auto_calibration PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_auto_calibration PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_auto_calibration PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_auto_calibration PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
