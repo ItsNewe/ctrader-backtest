@@ -1,0 +1,24 @@
+; FillUpAdaptive v4 - XAUUSD Aggressive Configuration
+; Backtest: 16.9x return, 81.0% max DD, 71332 trades
+; Period: 2025.01.01 - 2025.12.29, $10k initial, 1:500 leverage
+; WARNING: survive=12% is near max adverse move (~11-12% in 2025)
+
+; === Core Strategy Parameters ===
+SurvivePct=12.0
+BaseSpacingPct=0.05
+MinVolume=0.01
+MaxVolume=10.0
+
+; === Adaptive Spacing ===
+VolatilityLookbackHours=4.0
+TypicalVolPct=0.55
+MinSpacingMult=0.5
+MaxSpacingMult=3.0
+MinSpacingPct=0.005
+MaxSpacingPct=1.0
+SpacingChangeThresholdPct=0.01
+
+; === Display & Safety ===
+ShowDashboard=true
+EnableTrading=true
+MagicNumber=123458

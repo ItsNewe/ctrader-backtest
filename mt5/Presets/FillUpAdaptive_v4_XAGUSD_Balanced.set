@@ -1,0 +1,24 @@
+; FillUpAdaptive v4 - XAGUSD Balanced Configuration
+; Backtest: 43.4x return, 29.3% max DD, 356 trades
+; Period: 2025.01.02 - 2026.01.24, $10k initial, 1:500 leverage
+; Measured XAGUSD 1h median range: 0.45%
+
+; === Core Strategy Parameters ===
+SurvivePct=19.0
+BaseSpacingPct=2.0
+MinVolume=0.01
+MaxVolume=100.0
+
+; === Adaptive Spacing ===
+VolatilityLookbackHours=1.0
+TypicalVolPct=0.45
+MinSpacingMult=0.5
+MaxSpacingMult=3.0
+MinSpacingPct=0.05
+MaxSpacingPct=15.0
+SpacingChangeThresholdPct=0.2
+
+; === Display & Safety ===
+ShowDashboard=true
+EnableTrading=true
+MagicNumber=123458
