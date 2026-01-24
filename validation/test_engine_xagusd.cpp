@@ -20,6 +20,8 @@ struct RunConfig {
     double min_spacing_mult;
     double max_spacing_mult;
     double swap_long_points; // Swap in points (e.g., -15 for XAGUSD)
+    double spacing_change_threshold = 0.1;
+    bool pct_spacing = false;  // When true, spacing values are % of price
     std::string label;
 };
 
@@ -78,7 +80,8 @@ RunResult RunBacktest(const RunConfig& cfg, const std::vector<Tick>& shared_tick
         adaptive_cfg.max_spacing_mult = cfg.max_spacing_mult;
         adaptive_cfg.min_spacing_abs = cfg.min_spacing_abs;
         adaptive_cfg.max_spacing_abs = cfg.max_spacing_abs;
-        adaptive_cfg.spacing_change_threshold = 0.1;
+        adaptive_cfg.spacing_change_threshold = cfg.spacing_change_threshold;
+        adaptive_cfg.pct_spacing = cfg.pct_spacing;
 
         FillUpOscillation strategy(
             cfg.survive_pct,
@@ -179,7 +182,7 @@ int main(int argc, char* argv[]) {
     mt5_cfg.survive_pct = 19.0;
     mt5_cfg.base_spacing = 0.75;
     mt5_cfg.lookback_hours = 1.0;
-    mt5_cfg.typical_vol_pct = 0.5;
+    mt5_cfg.typical_vol_pct = 0.45;  // Measured XAGUSD 1h median range
     mt5_cfg.min_spacing_abs = 0.02;
     mt5_cfg.max_spacing_abs = 5.0;
     mt5_cfg.min_spacing_mult = 0.5;
@@ -214,25 +217,30 @@ int main(int argc, char* argv[]) {
 
     // Build sweep configurations
     std::vector<RunConfig> configs;
-    std::vector<double> survive_vals = {19, 25, 30};
-    std::vector<double> spacing_vals = {0.20, 0.50, 0.75, 1.00};
+
+    // Percentage spacing sweep: survive 18-20, spacing 1.0%-4.0%, lookback 1h/4h
+    std::vector<double> survive_vals = {18, 19, 20};
+    std::vector<double> pct_spacing_vals = {1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0};
     std::vector<double> lookback_vals = {1.0, 4.0};
 
     for (double survive : survive_vals) {
-        for (double spacing : spacing_vals) {
+        for (double spacing_pct : pct_spacing_vals) {
             for (double lookback : lookback_vals) {
                 RunConfig cfg;
                 cfg.survive_pct = survive;
-                cfg.base_spacing = spacing;
+                cfg.base_spacing = spacing_pct;
                 cfg.lookback_hours = lookback;
-                cfg.typical_vol_pct = 0.5;
-                cfg.min_spacing_abs = 0.02;
-                cfg.max_spacing_abs = 5.0;
+                // Measured XAGUSD median ranges: 1h=0.45%, 4h=0.97%
+                cfg.typical_vol_pct = (lookback <= 1.0) ? 0.45 : 0.97;
+                cfg.min_spacing_abs = 0.05;       // 0.05% of price
+                cfg.max_spacing_abs = 15.0;       // 15% of price
                 cfg.min_spacing_mult = 0.5;
                 cfg.max_spacing_mult = 3.0;
                 cfg.swap_long_points = -15.0;
+                cfg.spacing_change_threshold = 0.2;
+                cfg.pct_spacing = true;
                 cfg.label = "s" + std::to_string((int)survive)
-                          + "_sp" + std::to_string(spacing).substr(0, 4)
+                          + "_" + std::to_string(spacing_pct).substr(0, 3) + "%"
                           + "_lb" + std::to_string((int)lookback);
                 configs.push_back(cfg);
             }

@@ -20,7 +20,7 @@ input double MaxVolume = 100.0;           // Maximum lot size
 
 input group "=== Adaptive Spacing ==="
 input double VolatilityLookbackHours = 1.0;  // Volatility lookback (hours)
-input double TypicalVolPct = 0.5;            // Typical volatility (% of price)
+input double TypicalVolPct = 0.45;           // Typical volatility (% of price) [XAGUSD 1h=0.45, 4h=0.97]
 input double MinSpacingMult = 0.5;           // Min spacing multiplier
 input double MaxSpacingMult = 3.0;           // Max spacing multiplier
 input double MinSpacingPct = 0.05;           // Min absolute spacing (% of price)
