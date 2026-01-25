@@ -1174,3 +1174,111 @@ EA v4 equivalents:
 | Trade count | >5,000 | 10,334 | PASS |
 | Improvements | None beat baseline | All tested failed | PASS |
 | Risk of ruin | <1% (Monte Carlo) | 0.10% | PASS |
+
+---
+
+## 14. Percentage-Based Spacing & Regime Independence (2026-01-25)
+
+### Why Percentage-Based Spacing
+
+Absolute dollar spacing fails when price changes significantly:
+- Gold 2024 avg: ~$2,300 → $1.50 spacing = 0.065% of price
+- Gold 2025 avg: ~$3,500 → $1.50 spacing = 0.043% of price (34% tighter!)
+- Gold at $5,000 → $1.50 spacing = 0.030% of price
+
+**The v4 EA uses percentage-based spacing by default** (`BaseSpacingPct`). This ensures consistent grid behavior regardless of price level.
+
+### Regime Independence Analysis
+
+Tested 2024 (+27% trend) vs 2025 (+60% trend) to measure "regime dependence":
+
+| Spacing Type | Best Ratio | Interpretation |
+|--------------|------------|----------------|
+| Absolute $ | 2.35x | 2025 returned 2.35x more than 2024 |
+| **Percentage %** | **1.73x** | More stable across regimes |
+
+Lower ratio = more regime-independent.
+
+### The Sweet Spot: 0.06-0.10% with High TypVol
+
+**Test file**: `validation/test_sweetspot_sweep.cpp` (1020 configs, parallel)
+
+| Config | 2025 | 2024 | Ratio | 2025 DD |
+|--------|------|------|-------|---------|
+| s12_sp0.085%_lb2.0_tv1.20 | 5.35x | 3.16x | **1.69x** | 91.9% |
+| s13_sp0.085%_lb2.0_tv1.20 | 4.71x | 2.75x | **1.71x** | 85.0% |
+| s13_sp0.090%_lb2.0_tv1.20 | 4.79x | 2.79x | **1.72x** | 84.7% |
+
+**Key discovery**: Regime independence comes from the **spacing + typvol combination**, not spacing alone.
+
+| typvol | Spacing | Avg Ratio | Regime Dependence |
+|--------|---------|-----------|-------------------|
+| 0.20-0.35% | any | 4-6x | HIGH |
+| **0.80-1.20%** | **0.06-0.10%** | **1.7-2.1x** | **LOW** |
+
+High typvol dampens the adaptive spacing mechanism, making it more stable.
+
+### U-Curve Pattern (Percentage Spacing)
+
+Both tiny and wide percentage spacings show high regime dependence:
+
+```
+Regime
+Ratio
+   8x │                                          ●●
+      │                                        ●    ●
+   6x │                                              ●
+      │  ●
+   4x │    ●  ●                              ●
+      │         ●    ●●                  ●
+   3x │              ●●●●              ●
+      │                  ●●●●●●●●●●
+   2x │        ●●
+      │
+   1x │
+      └──────────────────────────────────────────────
+        0.01  0.05  0.1   0.3  0.5  1   2   3  4  5  6  (%)
+              ▲▲
+           SWEET SPOT (0.05-0.06% at tv=0.55%)
+```
+
+**Why the pattern exists:**
+- **Tiny (<0.04%)**: Captures micro-noise, 2025 had more ATH noise
+- **Sweet spot (0.05-0.10%)**: Captures median oscillation amplitude
+- **Wide (>2%)**: Captures trend pullbacks only, pure trend exposure
+
+### Survive 12% vs 13%
+
+| Survive | Avg 2025 | Avg 2024 | Avg Ratio | Avg DD |
+|---------|----------|----------|-----------|--------|
+| 12% | 11.34x | 2.85x | 3.98x | 85.3% |
+| **13%** | **7.71x** | **2.59x** | **2.98x** | **74.9%** |
+
+**survive=13% is 25% more regime-stable** and has 10% lower DD.
+
+### Recommended Configs by Goal
+
+| Goal | Config | 2025 | 2024 | Ratio | DD |
+|------|--------|------|------|-------|-----|
+| **Regime stability** | sp=0.085%, lb=2h, tv=1.20, s=13 | 4.71x | 2.75x | 1.71x | 85% |
+| **Max return** | sp=0.045%, lb=8h, tv=0.55, s=12 | 17.69x | 3.00x | 5.90x | 82% |
+| **Lowest DD** | sp=0.030%, lb=8h, tv=0.20, s=13 | 10.77x | 2.29x | 4.70x | 63% |
+| **Balanced** | sp=0.06%, lb=4h, tv=0.55, s=13 | 7.61x | 2.46x | 3.10x | 80% |
+
+### Test Files Created
+
+| File | Purpose |
+|------|---------|
+| `test_wide_spacing_analysis.cpp` | Wide spacing trend dependence |
+| `test_small_spacing_regime.cpp` | Small spacing regime test |
+| `test_pct_spacing_regime.cpp` | Absolute vs percentage comparison |
+| `test_pct_regime_parallel.cpp` | Full % range (0.01-6%) parallel |
+| `test_sweetspot_sweep.cpp` | 1020-config sweet spot sweep |
+
+### Practical Implications
+
+1. **Use percentage-based spacing** (v4 EA default) for price-level independence
+2. **For regime stability**: Use higher typvol (0.80-1.20%) with 0.06-0.10% spacing
+3. **For max returns**: Accept higher regime dependence with lower typvol
+4. **survive=13%** provides better risk-adjusted returns than 12%
+5. **The ~1.7x irreducible ratio** represents true market regime difference (volatility, oscillation frequency) that cannot be eliminated by parameter choice
