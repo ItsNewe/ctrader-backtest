@@ -1282,3 +1282,146 @@ Ratio
 3. **For max returns**: Accept higher regime dependence with lower typvol
 4. **survive=13%** provides better risk-adjusted returns than 12%
 5. **The ~1.7x irreducible ratio** represents true market regime difference (volatility, oscillation frequency) that cannot be eliminated by parameter choice
+
+---
+
+## 15. Chaos Theory Investigations (2026-01-26)
+
+### Motivation
+
+The FillUp strategy can be viewed as dynamic stabilization (Kapitza pendulum analogy) - market oscillations stabilize the grid structure. Eight chaos-inspired trading concepts were investigated.
+
+### Summary of Results
+
+| # | Concept | Result | Best Return | vs Baseline | Verdict |
+|---|---------|--------|-------------|-------------|---------|
+| 1 | **Floating Attractor Grid** | **SUCCESS** | **11.05x** | +36% | Grid tracks EMA, larger TPs |
+| 2 | Synchronization (Pairs) | FAIL | 0.92x | -89% | Both metals trend together |
+| 3 | **Edge of Chaos** | **SUCCESS** | **15.98x** | +97% | Phase transition at survive=12% |
+| 4 | OGY Control (Timing) | PARTIAL | 1.91x | -77% | Timing validated, low returns |
+| 5 | Bifurcation Detection | FAIL | 8.14x | +0% | Signals fire too late |
+| 6 | Entropy Export | FAIL | 1.45x | -82% | Cutting losers destroys returns |
+| 7 | Fractal Multi-Scale | FAIL | 10.71x | +1% | No diversification benefit |
+| 8 | Noise Scaling | FAIL | 7.95x | -2% | Noise ratio ~1.0, no signal |
+
+Baseline: FillUpOscillation ADAPTIVE_SPACING = 8.13x return, 77.7% DD
+
+### Investigation #1: Floating Attractor Grid
+
+**Concept**: Grid "floats" around a moving average (EMA) instead of fixed price levels.
+
+**Best config**: EMA-200, TP multiplier 2.0
+- Return: **11.05x** (+36% vs baseline)
+- Max DD: **67.6%** (-10pp vs baseline)
+- Sharpe: **14.87** (+62% vs baseline)
+
+**Why it works**: When price dips below EMA, it typically reverts back past the mean. Larger TPs (2.0x) capture more of this reversion.
+
+**Trade-off discovered**:
+- High returns (11.05x) = higher regime dependence (4.45 ratio)
+- Low regime dependence (1.89 ratio) = moderate returns (5.08x)
+
+**Files**: `include/strategy_floating_attractor.h`, `validation/test_floating_attractor.cpp`
+
+### Investigation #3: Edge of Chaos
+
+**Concept**: Complex systems are most adaptive at the boundary between order and chaos.
+
+**Key finding**: Clear **phase transition at survive=12%**
+- Below 12%: 100% stop-out (chaotic regime)
+- At 12%: Highest returns (15.98x) AND lowest chaos scores
+- Above 12%: Returns decrease, stability increases
+
+**Best config**: survive=12%, spacing=$1.50, lookback=8h
+- Return: **15.98x** (+97% vs baseline)
+- Max DD: 81.0%
+- Sharpe: **18.49**
+
+**Paradox**: The "edge of chaos" produces both maximum returns AND stable behavior. This is because at survive=12%, the grid is optimally sized to capture oscillations without overloading.
+
+**Goldilocks zone** (stable AND profitable): survive=13%, spacing=$3-4, lookback=8h
+- Return: 7.69-8.13x
+- Max DD: 63-66%
+- Most stable behavior (lowest chaos scores)
+
+**Files**: `validation/test_edge_of_chaos.cpp`
+
+### Investigation #4: OGY Control Method
+
+**Concept**: Chaotic systems can be controlled with tiny, well-timed perturbations at unstable equilibria.
+
+**Key finding**: Timing at velocity zero-crossings (local min/max) **100% outperforms random timing**
+
+| Timing | Return | Max DD |
+|--------|--------|--------|
+| OGY (velocity zero) | 1.91x | 88.7% |
+| Random | 0.01x | 99.4% (SO) |
+
+**Optimal parameters**:
+- Velocity window: 100 ticks (10-50 too noisy, 500+ misses signals)
+- Detection method: VELOCITY_ZERO only (LOCAL_MINMAX doesn't work)
+
+**Actionable insight**: Velocity zero-crossing detection could improve FillUpOscillation entry timing.
+
+**Files**: `include/strategy_ogy_control.h`, `validation/test_ogy_control.cpp`
+
+### Failed Investigations
+
+#### #2: Chaos Synchronization (Pairs Trading)
+- Gold/silver ratio IS mean-reverting (94%+ reversion rate)
+- BUT both metals trended together in 2025, negating hedge benefit
+- Best pairs config lost 8% while single-instrument made 6.57x
+- **Files**: `include/strategy_chaos_sync.h`, `validation/test_chaos_sync.cpp`
+
+#### #5: Bifurcation Detection
+- Signals (vol_of_vol, range_ratio, velocity_accel) fire too late
+- By the time bifurcation detected, positions already accumulated
+- Natural defense (margin exhaustion) more effective than signal-based
+- **Files**: `include/strategy_bifurcation.h`, `validation/test_bifurcation.cpp`
+
+#### #6: Entropy Export (Dissipative Structures)
+- Cutting losing positions destroys the profit mechanism
+- Best config: 1.45x return, 39% DD vs baseline 8.13x, 77% DD
+- Trade-off: ~3:1 (lose 3% returns per 1% DD saved)
+- **Files**: `include/strategy_entropy_export.h`, `validation/test_entropy_export.cpp`
+
+#### #7: Fractal Multi-Scale Grids
+- Triple-scale is harmful: -27% return, +11% DD vs single-scale
+- No diversification benefit - all scales lose during drawdowns together
+- Micro-scale (0.02%) captures noise, not signal
+- **Files**: `validation/test_fractal_grid.cpp`
+
+#### #8: Noise as Signal Carrier
+- Noise ratio stays near 1.0 (short/long-term noise highly correlated)
+- ADAPTIVE_SPACING already captures volatility information
+- 0/216 configs beat baseline
+- **Files**: `include/strategy_noise_scaling.h`, `validation/test_noise_scaling.cpp`
+
+### Key Insights
+
+1. **The grid's profit mechanism IS its drawdown mechanism** - You cannot reduce DD without destroying returns. This explains why bifurcation detection, entropy export, and other "protective" mechanisms fail.
+
+2. **Phase transitions exist in parameter space** - survive=12% is a sharp boundary. This is the "edge of chaos" where the strategy is maximally effective.
+
+3. **Entry timing matters** - OGY investigation proved velocity zero-crossing beats random timing by 190x. This can improve existing strategies.
+
+4. **Floating attractor improves both return AND risk** - Rare finding where both metrics improve simultaneously.
+
+### Recommended Combinations
+
+| Goal | Configuration | Expected |
+|------|---------------|----------|
+| **Max Sharpe** | Floating attractor (EMA-200, TP 2.0) + survive=12% | ~16-18x return, ~70% DD |
+| **Regime stable** | Floating attractor + survive=13% + 8h lookback | ~8-10x return, ~60% DD |
+| **Entry timing** | Add velocity zero-crossing filter to FillUpOscillation | Fewer but better entries |
+
+### Strategy Files Created
+
+| File | Concept | Status |
+|------|---------|--------|
+| `strategy_floating_attractor.h` | Floating attractor grid | **PROMISING** |
+| `strategy_ogy_control.h` | OGY chaos control | Timing insight useful |
+| `strategy_chaos_sync.h` | Pairs trading | FAIL |
+| `strategy_bifurcation.h` | Bifurcation detection | FAIL |
+| `strategy_entropy_export.h` | Entropy export | FAIL |
+| `strategy_noise_scaling.h` | Noise scaling | FAIL |
