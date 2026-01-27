@@ -842,6 +842,7 @@ At $96 silver with 2.0% spacing:
 | XAGUSD engine sweep | `test_engine_xagusd.cpp` | 42-config pct_spacing sweep |
 | XAGUSD volatility | `test_xagusd_vol.cpp` | Measured 1h=0.45%, 4h=0.97% |
 | **Forced entry validation** | `test_forced_entry_validation.cpp` | 2024/2025 regime independence, +69-80% return |
+| **Forced entry features** | `test_forced_entry_features.cpp` | Mode comparison: ADAPTIVE only! Others fail |
 
 ### MT5 EA Files
 
@@ -2228,14 +2229,79 @@ Validated across both years to confirm no overfitting:
 
 MAX150 achieves **lower DD than baseline FORCE_OFF** with higher returns.
 
+### CRITICAL: Forced Entry is Mode-Specific
+
+**Forced entry only works with ADAPTIVE_SPACING mode.** Testing across all FillUpOscillation modes revealed:
+
+#### Modes Where Forced Entry WORKS
+
+| Mode | Without Force | With Force | Improvement |
+|------|---------------|------------|-------------|
+| **ADAPTIVE 12%** | 41.31x | **100.72x** | **+144%** |
+| **ADAPTIVE 13%** | 23.64x | **71.87x** | **+204%** |
+| ALL_COMB 12% | 14.68x | 30.52x | +108% |
+| ALL_COMB 13% | 13.45x | 29.96x | +123% |
+| VELOCITY 12% | 14.63x | 22.45x | +53% |
+| VELOCITY 13% | 12.77x | 22.45x | +76% |
+
+#### Modes Where Forced Entry DESTROYS Performance
+
+| Mode | Without Force | With Force | Result |
+|------|---------------|------------|--------|
+| **BASELINE** | 25.48x | **0.09x** | **-99.6% WIPEOUT** |
+| **ADAPT_LB** | 25.48x | **0.09x** | **-99.5% WIPEOUT** |
+| **ANTIFRAG** | 25.87x | **0.08x** | **-99.5% WIPEOUT** |
+| **DBL_ADPT** | 25.46x | **0.08x** | **-99.7% WIPEOUT** |
+| **TREND** | 45.33x | **0.00x** | **-99.99% TOTAL LOSS** |
+
+#### Why This Happens
+
+**ADAPTIVE_SPACING** dynamically adjusts grid spacing based on volatility:
+- At $2,300 gold → spacing ~$1.50 = 0.065% of price
+- At $4,500 gold → spacing widens proportionally to ~$2.90
+
+**Fixed-spacing modes** (BASELINE, ADAPT_LB, etc.) keep $1.50 regardless of price:
+- At $2,300 → spacing = 0.065% (reasonable)
+- At $4,500 → spacing = 0.033% (too tight!)
+- Forced entries at too-tight spacing → overleveraged → stop-out
+
+#### Best Overall Configuration
+
+| Config | 2-Year Return | Max DD | Assessment |
+|--------|---------------|--------|------------|
+| **ADAPTIVE 12% + Force** | **100.72x** | 81.3% | **Highest return** |
+| ADAPTIVE 13% + Force | 71.87x | **69.5%** | **Best risk-adjusted** |
+| ALL_COMB 13% + Force | 29.96x | 73.7% | Lower return |
+
+**ADAPTIVE 12% with forced entry is the highest-performing configuration**, but with higher DD risk. For production, **ADAPTIVE 13% + Force + MAX150** offers the best balance.
+
+#### Forced Entry Rules
+
+✅ **ENABLE forced entry for:**
+- `ADAPTIVE_SPACING` mode
+- `ALL_COMBINED` mode (includes adaptive)
+- `VELOCITY_FILTER` mode
+
+❌ **DO NOT enable forced entry for:**
+- `BASELINE` - will cause stop-out
+- `ADAPT_LB` - will cause stop-out
+- `ANTIFRAG` - will cause stop-out
+- `DBL_ADPT` - will cause stop-out
+- `TREND` - will cause total loss
+
 ### Recommended Configurations
 
-| Goal | Config | Expected |
-|------|--------|----------|
-| Maximum return | FORCE_ON (unlimited) | 17.5x, 70% DD |
-| **Balanced (recommended)** | **FORCE_ON + MAX200** | **16.2x, 67% DD** |
-| **Risk-adjusted best** | **FORCE_ON + MAX150** | **13.4x, 59% DD** |
-| Conservative | FORCE_ON + MAX100 | 9.2x, 63% DD |
+**All configurations use ADAPTIVE_SPACING mode (required for forced entry)**
+
+| Goal | Survive | Force | Max Pos | 2-Year Return | Max DD |
+|------|---------|-------|---------|---------------|--------|
+| **Maximum return** | **12%** | ON | unlimited | **100.72x** | 81.3% |
+| Aggressive | 12% | ON | MAX200 | ~95x | ~78% |
+| **Balanced (recommended)** | **13%** | **ON** | **MAX200** | **~68x** | **~67%** |
+| Risk-adjusted | 13% | ON | MAX150 | ~55x | ~59% |
+| Conservative | 13% | ON | MAX100 | ~40x | ~55% |
+
+**Note**: CombinedJu strategy (Rubber Band TP + Velocity + Barbell) is a separate strategy from FillUpOscillation modes. The original forced entry discovery (13.37x → 22.22x, +66%) was on CombinedJu.
 
 ### Strategies Updated with Forced Entry + Safety Mechanisms
 
