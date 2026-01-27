@@ -1425,3 +1425,153 @@ Baseline: FillUpOscillation ADAPTIVE_SPACING = 8.13x return, 77.7% DD
 | `strategy_bifurcation.h` | Bifurcation detection | FAIL |
 | `strategy_entropy_export.h` | Entropy export | FAIL |
 | `strategy_noise_scaling.h` | Noise scaling | FAIL |
+
+---
+
+## 16. Dynamic Models Investigation (2026-01-27)
+
+### Motivation
+
+Explored whether mathematical/physics dynamic models could improve strategy performance. Five models were implemented and tested against the ADAPTIVE_SPACING baseline.
+
+### Summary of Results
+
+| # | Model | Result | Best Return | vs Baseline | Key Finding |
+|---|-------|--------|-------------|-------------|-------------|
+| 1 | **Ornstein-Uhlenbeck** | FAIL | 7.73x | -5% | Theta estimation too noisy |
+| 2 | **Kalman Filter** | FAIL | 18.67x | -6% | No better than simple EMA |
+| 3 | **Regime-Switching (HMM)** | FAIL | ~8x | ~0% | Trending regime never detected |
+| 4 | **Adaptive Control** | PARTIAL | 16.46x | +6% | Improves regime stability only |
+| 5 | **Van der Pol Oscillator** | FAIL | 6.74x | -17% | Phase estimation unreliable |
+
+Baseline: FillUpOscillation ADAPTIVE_SPACING = 8.13x (2025), 2.38x (2024)
+
+### Investigation #1: Ornstein-Uhlenbeck Process
+
+**Concept**: Mean-reversion model with parameters θ (reversion speed), μ (mean), σ (volatility). Adjust spacing based on estimated θ - high θ means fast reversion, use tighter spacing.
+
+**Implementation**: Estimate θ from lag-1 autocorrelation: θ ≈ -ln(ρ₁)
+
+**Results**:
+- 0/48 configs beat baseline in 2025
+- 45/48 configs beat baseline in 2024
+- Theta range: 0.001 to 6.91 (6,900x variance) - extremely noisy
+
+**Why it fails**: Autocorrelation-based theta estimation is too noisy at tick frequency. The simple volatility-range heuristic captures the same information more reliably.
+
+**Files**: `include/strategy_ornstein_uhlenbeck.h`, `validation/test_ornstein_uhlenbeck.cpp`
+
+### Investigation #2: Kalman Filter
+
+**Concept**: Optimal state estimation from noisy observations. Track hidden "true price" and uncertainty. Use Kalman-filtered price as attractor instead of EMA.
+
+**Implementation**: 2D state (price, velocity) with configurable process noise (Q) and measurement noise (R).
+
+**Results**:
+- Best Kalman: 18.67x vs best EMA: 19.95x (-6%)
+- Uncertainty-based spacing: -29% return (hurts badly)
+- Q/R ratio irrelevant: all values within 6% of each other
+
+**Why it fails**:
+1. Tick data is already clean - Kalman's adaptive smoothing provides no benefit
+2. Uncertainty is highest during high volatility - exactly when we want to trade most
+3. Simple EMA is sufficient for attractor estimation
+
+**Files**: `include/strategy_kalman_filter.h`, `validation/test_kalman_filter.cpp`
+
+### Investigation #3: Regime-Switching (Hidden Markov Model)
+
+**Concept**: Market switches between hidden states (OSCILLATING, TRENDING, HIGH_VOL). Detect current regime and adapt parameters.
+
+**Implementation**:
+- direction_ratio = |sum(returns)| / sum(|returns|) for trend detection
+- volatility_ratio for high-vol detection
+- Different parameters per regime
+
+**Results**:
+- **Trending regime NEVER detected** (0 ticks in both years)
+- 91-95% of time spent in OSCILLATING state
+- High-vol detection works but costs too much return (-8% for -7% DD)
+
+**Why it fails**: Gold oscillates so frequently that sustained directional moves are rare. The direction_ratio thresholds (0.6-0.8) are too strict - but lowering them would trigger false positives.
+
+**Files**: `include/strategy_regime_switching.h`, `validation/test_regime_switching.cpp`
+
+### Investigation #4: Adaptive Control
+
+**Concept**: Self-tuning parameters. Define targets (DD < 50%, Sharpe > 8) and automatically adjust survive_pct and spacing to achieve them.
+
+**Implementation**:
+- Track rolling DD and Sharpe over last N trades
+- If DD > target: increase survive_pct
+- If Sharpe < target: widen spacing
+- Smooth adjustment with learning rate α
+
+**Results**:
+- **0% achieved DD targets** - DD mechanism IS profit mechanism
+- **50% better regime independence** (2025/2024 ratio: 1.97x vs 3.94x)
+- Parameters diverge to survive=12%, spacing=$4.51 (not optimal)
+
+**Why it partially works**: Cannot achieve DD targets because the grid's drawdown IS its recovery mechanism. However, the adaptation does smooth out year-to-year variance, improving consistency at cost of peak returns.
+
+**Files**: `include/strategy_adaptive_control.h`, `validation/test_adaptive_control.cpp`
+
+### Investigation #5: Van der Pol Oscillator
+
+**Concept**: Model price as nonlinear oscillator with stable limit cycle. Estimate phase (0-360°) and trade at specific phases - buy at trough (270°), sell at peak (90°).
+
+**Implementation**:
+- Track deviation from MA (x) and velocity (v)
+- Phase = atan2(x_norm, v_norm)
+- Entry when phase in [240°, 300°], exit when phase in [60°, 120°]
+
+**Results**:
+- 0% beat baseline in 2025 (-17% for best config)
+- Phase-based exit worse than fixed TP
+- Lower DD (~40% vs ~78%) but at cost of returns
+
+**Why it fails**: Gold doesn't behave as a single-frequency oscillator. Multiple overlapping frequencies, regime changes, and news-driven jumps make phase estimation unreliable. The phase angle provides no predictive value.
+
+**Files**: `include/strategy_vanderpol.h`, `validation/test_vanderpol.cpp`
+
+### Key Insights
+
+1. **Simple heuristics beat mathematical models**: Volatility-adaptive spacing outperforms OU estimation, Kalman filtering, regime detection, and phase-based timing.
+
+2. **The market doesn't fit clean models**:
+   - Not a single-frequency oscillator (Van der Pol fails)
+   - No clearly separable regimes (HMM fails)
+   - Extremely noisy mean-reversion estimates (OU fails)
+
+3. **DD cannot be reduced without reducing returns**: All protective mechanisms (adaptive control, regime switching, phase-based entry) reduce DD at disproportionate return cost.
+
+4. **Regime independence is achievable but costly**: Adaptive control improved consistency by 50% but reduced peak returns.
+
+### Why ADAPTIVE_SPACING Works Better
+
+The production ADAPTIVE_SPACING strategy uses a simple heuristic:
+```
+spacing = base_spacing * (recent_range / typical_range)
+```
+
+This works because:
+1. **Direct measurement**: Measures actual price movement, not model parameters
+2. **No estimation error**: No fitting, no noise amplification
+3. **Instant adaptation**: Updates every lookback window, not dependent on trade count
+4. **Robust to model misspecification**: Doesn't assume any particular price dynamics
+
+### Strategy Files Created
+
+| File | Model | Status |
+|------|-------|--------|
+| `strategy_ornstein_uhlenbeck.h` | OU mean-reversion | FAIL |
+| `strategy_kalman_filter.h` | Kalman state estimation | FAIL |
+| `strategy_regime_switching.h` | HMM-style regime detection | FAIL |
+| `strategy_adaptive_control.h` | Self-tuning control | PARTIAL (regime stability only) |
+| `strategy_vanderpol.h` | Phase-based oscillator | FAIL |
+
+### Conclusion
+
+**All 5 dynamic models failed to improve on the baseline.** The grid strategy's simplicity is its strength. It captures oscillations without depending on accurate parameter estimation, optimal filtering, regime detection, self-tuning, or phase estimation.
+
+The ADAPTIVE_SPACING heuristic remains the best approach - it directly measures what matters (how much price is moving) without the complexity and noise of mathematical models.
