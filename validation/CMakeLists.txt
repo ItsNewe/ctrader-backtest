@@ -2357,3 +2357,48 @@ target_compile_options(test_mt5_vs_cpp_comparison PRIVATE -O3)
 target_link_libraries(test_mt5_vs_cpp_comparison PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
 set_target_properties(test_mt5_vs_cpp_comparison PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
 message(STATUS "MT5 vs C++ comparison test configured: test_mt5_vs_cpp_comparison")
+
+# Velocity filter diagnosis test
+add_executable(test_velocity_filter_diagnosis test_velocity_filter_diagnosis.cpp)
+target_include_directories(test_velocity_filter_diagnosis PRIVATE ../include)
+target_compile_features(test_velocity_filter_diagnosis PRIVATE cxx_std_17)
+target_compile_options(test_velocity_filter_diagnosis PRIVATE -O3)
+target_link_libraries(test_velocity_filter_diagnosis PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_velocity_filter_diagnosis PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Velocity filter diagnosis test configured: test_velocity_filter_diagnosis")
+
+# Velocity filter extended diagnosis
+add_executable(test_velocity_diagnosis_extended test_velocity_diagnosis_extended.cpp)
+target_include_directories(test_velocity_diagnosis_extended PRIVATE ../include)
+target_compile_features(test_velocity_diagnosis_extended PRIVATE cxx_std_17)
+target_compile_options(test_velocity_diagnosis_extended PRIVATE -O3)
+target_link_libraries(test_velocity_diagnosis_extended PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_velocity_diagnosis_extended PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Velocity diagnosis extended test configured: test_velocity_diagnosis_extended")
+
+# Tick characteristics analysis
+add_executable(test_tick_characteristics test_tick_characteristics.cpp)
+target_include_directories(test_tick_characteristics PRIVATE ../include)
+target_compile_features(test_tick_characteristics PRIVATE cxx_std_17)
+target_compile_options(test_tick_characteristics PRIVATE -O3)
+target_link_libraries(test_tick_characteristics PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_tick_characteristics PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Tick characteristics test configured: test_tick_characteristics")
+
+# MT5 simulation test (wider spread, tick subsampling)
+add_executable(test_mt5_simulation test_mt5_simulation.cpp)
+target_include_directories(test_mt5_simulation PRIVATE ../include)
+target_compile_features(test_mt5_simulation PRIVATE cxx_std_17)
+target_compile_options(test_mt5_simulation PRIVATE -O3)
+target_link_libraries(test_mt5_simulation PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_mt5_simulation PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "MT5 simulation test configured: test_mt5_simulation")
+
+# Combined Ju detailed stats test
+add_executable(test_combined_ju_detailed_stats test_combined_ju_detailed_stats.cpp)
+target_include_directories(test_combined_ju_detailed_stats PRIVATE ../include)
+target_compile_features(test_combined_ju_detailed_stats PRIVATE cxx_std_17)
+target_compile_options(test_combined_ju_detailed_stats PRIVATE -O3)
+target_link_libraries(test_combined_ju_detailed_stats PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_combined_ju_detailed_stats PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Combined Ju detailed stats test configured: test_combined_ju_detailed_stats")

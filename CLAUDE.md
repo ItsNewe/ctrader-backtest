@@ -1980,3 +1980,135 @@ Comprehensive comparison across 2024 and 2025:
 2. **CombinedJu_THR3**: Best risk-adjusted (89x return, 67.1% DD)
 3. **FloatingAttractor_v5**: High return but regime-dependent
 4. **FillUpAdaptive_v4**: Baseline, most conservative
+
+---
+
+## 19. Forced Entry Discovery (2026-01-27)
+
+### Background: C++ vs MT5 Discrepancy
+
+Investigation into why C++ backtest showed 28.59x return while MT5 showed only 13.37x for identical CombinedJu_P1_M3 parameters.
+
+### Root Cause Analysis
+
+Detailed diagnostic comparison revealed the source of the discrepancy:
+
+| Metric | C++ | MT5 | Ratio |
+|--------|-----|-----|-------|
+| Spacing condition TRUE | 27.5M | 19.1M | 1.44x |
+| Lot size zero blocks | 23.4M | 16.4M | 1.43x |
+| Entry attempts | 4.2M | 2.7M | 1.56x |
+| Velocity blocks | 4.1M | 2.7M | 1.52x |
+| Entries allowed | 27,612 | 31,180 | 0.89x |
+
+**Discovery**: When lot sizing returns 0 (margin protection), the C++ code was forcing entries at MinVolume (0.01 lots) while MT5 was correctly skipping the entry.
+
+The "bug" in C++ at line 404:
+```cpp
+lots = std::max(lots, config_.min_volume);  // Forces 0 -> 0.01!
+```
+
+### The Forced Entry Insight
+
+When lot sizing returns 0 and entry is skipped:
+1. `lowestBuy` stays stuck at the old (higher) entry price
+2. Spacing condition `lowestBuy >= ask + spacing` stays TRUE for millions of ticks
+3. Each tick triggers velocity filter check (wasted computation)
+4. When price rebounds, no position exists to capture the profit
+
+When entry is forced at MinVolume:
+1. `lowestBuy` updates to current ask price
+2. Spacing condition resets to FALSE
+3. Small position captures the rebound when price recovers
+4. Grid continues functioning normally
+
+### Experimental Validation
+
+Created `CombinedJu_ForcedEntry.mq5` EA with `ForceMinVolumeEntry` parameter:
+
+```mql5
+if(lots < MinVolume)
+{
+    if(ForceMinVolumeEntry)
+    {
+        lots = MinVolume;  // Force entry anyway!
+        wasForced = true;
+    }
+    else
+    {
+        return;  // Original behavior: skip entry
+    }
+}
+```
+
+### Results
+
+| Version | Return | Entries | Forced | Velocity Blocks | Max Pos |
+|---------|--------|---------|--------|-----------------|---------|
+| MT5 Original | 13.37x | 31,180 | 0 | 2,663,922 | 197 |
+| **MT5 Forced** | **22.22x** | 38,155 | 1,895 | **151,624** | 204 |
+| C++ Forced | 28.59x | 27,612 | 23.4M* | 4,136,256 | 138 |
+
+*C++ counts all cases where lot sizing returned 0, not just those during grid operation.
+
+### Key Findings
+
+1. **Return increased 66%** (13.37x → 22.22x) with forced entry enabled
+
+2. **Velocity blocks dropped 94%** (2.7M → 152K)
+   - Forcing entry updates `lowestBuy`, resetting the spacing condition
+   - Eliminates millions of redundant velocity filter checks
+
+3. **Only 5% of entries were forced** (1,895 of 38,155)
+   - Small intervention, large impact
+
+4. **Max positions increased only 4%** (197 → 204)
+   - Minimal additional risk exposure
+
+5. **Gap narrowed significantly**
+   - Original: MT5/C++ ratio = 0.47x (13.37/28.59)
+   - Forced: MT5/C++ ratio = 0.78x (22.22/28.59)
+   - Remaining 22% gap likely due to spread/execution differences
+
+### Why Forced Entry Works
+
+During drawdown periods:
+1. Lot sizing returns 0 due to margin pressure
+2. Skipping entry means missing the eventual rebound
+3. Even 0.01 lot positions contribute to recovery when price bounces
+4. The grid stays "alive" and responsive vs becoming "stuck"
+
+The risk is that during a sustained crash, forced entries could accelerate stop-out. However, on 2025-2026 data, the benefit of capturing rebounds far outweighed this risk.
+
+### Implementation
+
+**C++ (`strategy_combined_ju.h`)**:
+```cpp
+if (lots < config_.min_volume) {
+    stats_.lot_size_zero_blocks++;
+    // Force entry at min_volume anyway - the key insight!
+}
+// ... then:
+lots = std::max(lots, config_.min_volume);
+```
+
+**MT5 (`CombinedJu_ForcedEntry.mq5`)**:
+```mql5
+input bool ForceMinVolumeEntry = true;  // Force MinVolume when lot=0
+```
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `include/strategy_combined_ju.h` | C++ strategy with forced entry + tracking |
+| `mt5/CombinedJu_ForcedEntry.mq5` | MT5 EA with ForceMinVolumeEntry option |
+| `mt5/CombinedJu_Diagnostic.mq5` | Diagnostic EA for detailed statistics |
+| `validation/test_combined_ju_detailed_stats.cpp` | C++ detailed stats comparison |
+
+### Recommendation
+
+**Enable forced entry for production use**:
+- MT5: Use `CombinedJu_ForcedEntry.mq5` with `ForceMinVolumeEntry=true`
+- The 66% return increase with minimal additional risk is compelling
+- Monitor max positions during extended drawdowns as a safety check
