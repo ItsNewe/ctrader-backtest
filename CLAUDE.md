@@ -2112,3 +2112,149 @@ input bool ForceMinVolumeEntry = true;  // Force MinVolume when lot=0
 - MT5: Use `CombinedJu_ForcedEntry.mq5` with `ForceMinVolumeEntry=true`
 - The 66% return increase with minimal additional risk is compelling
 - Monitor max positions during extended drawdowns as a safety check
+
+### Broader Implications
+
+#### 1. The Margin Protection Paradox
+
+Conventional wisdom: "When margin is stressed, stop opening positions to avoid stop-out."
+
+**Reality**: Blocking entries during stress prevents the positions that would capture recovery:
+
+```
+Traditional:  Margin stressed → Block entry → Miss rebound → Stay stressed → Stop-out
+New approach: Margin stressed → Force tiny entry → Capture rebound → Recovery
+```
+
+The "safe" approach actually *increases* stop-out probability.
+
+#### 2. The "Keep the Grid Alive" Principle
+
+A grid strategy needs continuous position placement to function. When entries are blocked:
+- Grid becomes "frozen" at stale price levels
+- `lowestBuy` stays stuck, creating feedback loops
+- Millions of ticks wasted on redundant checks
+- Recovery opportunities systematically missed
+
+**Forcing MinVolume entries keeps the grid responsive and adaptive.**
+
+#### 3. Cost-Benefit of Micro-Positions (XAUUSD)
+
+| Metric | 0.01 Lot Position |
+|--------|-------------------|
+| Margin required | ~$5.25 (at $2,625, 500:1) |
+| Risk per $10 drop | -$10 |
+| Profit on $10 rebound | +$10 |
+| % of $10k account | 0.05% |
+
+Negligible margin cost, full participation in recovery. Asymmetric risk-reward.
+
+#### 4. Applies to ALL Grid Strategies
+
+Any strategy with this pattern is affected:
+```cpp
+if (lots < MinVolume) return;  // ← This "safety" hurts performance
+```
+
+Affected strategies:
+- `fill_up_oscillation.h`
+- `fill_up_strategy.h`
+- `strategy_gamma_scalper.h`
+- `strategy_entropy_harvester.h`
+- Any grid with margin-based entry blocking
+
+**All should be reviewed and updated.**
+
+#### 5. Alternative Safety Mechanisms
+
+Instead of blocking entries based on lot sizing, use:
+
+| Mechanism | Implementation | Benefit |
+|-----------|----------------|---------|
+| **Max position cap** | `if (positions >= 200) return;` | Hard limit on exposure |
+| **Equity hard stop** | `if (DD > 85%) CloseAll();` | Ultimate protection |
+| **Position velocity** | Alert if >10 positions/hour | Detect runaway grids |
+| **Margin level floor** | `if (margin_level < 100%) return;` | Direct margin check |
+
+These preserve grid responsiveness while providing meaningful safety.
+
+#### 6. Philosophical Shift
+
+| Old Model | New Model |
+|-----------|-----------|
+| Margin protection = conservative = safe | Forced micro-entries = "aggressive" = actually safer |
+| Do nothing during stress | Do something small during stress |
+| Prevent entries to avoid risk | Place entries to enable recovery |
+
+**The "do nothing" approach during stress is the risky choice.**
+
+#### 7. Remaining Risks
+
+Forced entry could backfire in:
+- Sustained 30%+ crashes without recovery
+- Black swan events beyond historical data
+- Flash crashes with no rebound
+
+**Mitigation**: Max position cap + survive_pct + equity hard stop provide layered protection.
+
+### Strategies Updated with Forced Entry + Safety Mechanisms
+
+The following strategies have been updated with the forced entry discovery and alternative safety mechanisms:
+
+| Strategy | File | SafetyConfig | Stats |
+|----------|------|--------------|-------|
+| **FillUpOscillation** | `fill_up_oscillation.h` | Full (force, max_pos, margin_floor, equity_stop) | Full |
+| **StrategyFloatingAttractor** | `strategy_floating_attractor.h` | Basic (force, max_pos) | Basic |
+| **FillUpKapitza** | `fill_up_kapitza.h` | Basic (force, max_pos) | Basic |
+| **StrategyCombinedJu** | `strategy_combined_ju.h` | Inline tracking | lot_size_zero_blocks |
+
+#### FillUpOscillation Safety Configuration
+
+```cpp
+// Full safety configuration
+FillUpOscillation::SafetyConfig safety;
+safety.force_min_volume_entry = true;   // Force entry at min_volume when lot sizing returns 0
+safety.max_positions = 200;             // Hard cap on concurrent positions
+safety.equity_stop_pct = 85.0;          // Close all if DD > 85%
+safety.margin_level_floor = 100.0;      // Skip entry if margin level < 100%
+
+// Apply via constructor
+FillUpOscillation strategy(survive_pct, base_spacing, min_vol, max_vol,
+                           contract_size, leverage, mode,
+                           antifragile_scale, velocity_threshold, lookback_hours,
+                           adaptive_config, safety);
+
+// Or set after construction
+strategy.SetSafetyConfig(safety);
+
+// Access stats
+auto& stats = strategy.GetStats();
+std::cout << "Forced entries: " << stats.forced_entries << std::endl;
+std::cout << "Max pos blocks: " << stats.max_position_blocks << std::endl;
+std::cout << "Peak positions: " << stats.peak_positions << std::endl;
+```
+
+#### Strategies NOT Yet Updated
+
+These strategies still have the old `if (lots < min_volume) return false;` pattern:
+
+```
+fill_up_oscillation_nas100.h
+fill_up_strategy_v11.h
+fill_up_strategy_v12.h
+strategy_adaptive_control.h
+strategy_barbell_sizing.h
+strategy_combined_chaos.h
+strategy_entropy_export.h
+strategy_entropy_export_v2.h
+strategy_entropy_harvester.h
+strategy_kalman_filter.h
+strategy_noise_scaling.h
+strategy_reflexivity.h
+strategy_regime_switching.h
+strategy_rubberband_tp.h
+strategy_via_negativa.h
+strategy_wuwei.h
+```
+
+Update these if they are used in production.

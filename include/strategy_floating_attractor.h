@@ -49,6 +49,10 @@ public:
         double typical_vol_pct;         // Typical volatility as % of price (for adaptive)
         double volatility_lookback_hours; // Hours for volatility calculation
 
+        // Safety configuration
+        bool force_min_volume_entry;    // Force entry at min_volume when lot sizing returns 0
+        int max_positions;              // Maximum concurrent positions (0 = unlimited)
+
         Config()
             : survive_pct(13.0),
               base_spacing(1.50),
@@ -61,7 +65,15 @@ public:
               tp_multiplier(1.0),
               adaptive_spacing(true),
               typical_vol_pct(0.5),
-              volatility_lookback_hours(4.0) {}
+              volatility_lookback_hours(4.0),
+              force_min_volume_entry(true),  // Default ON - forced entry discovery
+              max_positions(0) {}            // Unlimited by default
+    };
+
+    struct Stats {
+        long forced_entries = 0;
+        long max_position_blocks = 0;
+        int peak_positions = 0;
     };
 
     explicit StrategyFloatingAttractor(const Config& config)
@@ -126,9 +138,11 @@ public:
     double GetCurrentSpacing() const { return current_spacing_; }
     int GetAttractorCrossings() const { return attractor_crossings_; }
     long GetTicksProcessed() const { return ticks_processed_; }
+    const Stats& GetStats() const { return stats_; }
 
 private:
     Config config_;
+    Stats stats_;
 
     // Attractor state
     double attractor_;
@@ -304,7 +318,15 @@ private:
     }
 
     bool Open(double lots, double tp, TickBasedEngine& engine) {
-        if (lots < config_.min_volume) return false;
+        // Forced entry: if lot sizing returns 0 but force is enabled, use min_volume
+        if (lots < config_.min_volume) {
+            if (config_.force_min_volume_entry) {
+                lots = config_.min_volume;
+                stats_.forced_entries++;
+            } else {
+                return false;
+            }
+        }
 
         double final_lots = std::min(lots, config_.max_volume);
         final_lots = std::round(final_lots * 100.0) / 100.0;
@@ -315,6 +337,17 @@ private:
 
     void OpenNew(TickBasedEngine& engine) {
         int positions_total = (int)engine.GetOpenPositions().size();
+
+        // Track peak positions
+        if (positions_total > stats_.peak_positions) {
+            stats_.peak_positions = positions_total;
+        }
+
+        // Safety: max position cap
+        if (config_.max_positions > 0 && positions_total >= config_.max_positions) {
+            stats_.max_position_blocks++;
+            return;
+        }
 
         // Calculate deviation from attractor
         double deviation = current_bid_ - attractor_;

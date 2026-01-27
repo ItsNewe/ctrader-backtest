@@ -37,13 +37,37 @@ public:
         double typical_vol_pct;
         double min_spacing_mult;
         double max_spacing_mult;
-        double min_spacing_abs;
-        double max_spacing_abs;
+        double min_spacing_abs;      // In pct_spacing mode: percentage of price
+        double max_spacing_abs;      // In pct_spacing mode: percentage of price
         double spacing_change_threshold;
+        bool pct_spacing;            // When true, base_spacing and abs clamps are % of price
 
         AdaptiveConfig()
             : typical_vol_pct(0.5), min_spacing_mult(0.5), max_spacing_mult(3.0),
-              min_spacing_abs(0.5), max_spacing_abs(5.0), spacing_change_threshold(0.1) {}
+              min_spacing_abs(0.5), max_spacing_abs(5.0), spacing_change_threshold(0.1),
+              pct_spacing(false) {}
+    };
+
+    // Safety configuration - alternative to blocking entries
+    struct SafetyConfig {
+        bool force_min_volume_entry;   // Force entry at min_volume when lot sizing returns 0
+        int max_positions;             // Maximum concurrent positions (0 = unlimited)
+        double equity_stop_pct;        // Close all if DD exceeds this % (0 = disabled)
+        double margin_level_floor;     // Skip entry if margin level below this % (0 = disabled)
+
+        SafetyConfig()
+            : force_min_volume_entry(true),  // Default ON - key discovery
+              max_positions(0),               // Unlimited by default
+              equity_stop_pct(0),             // Disabled
+              margin_level_floor(0) {}        // Disabled
+    };
+
+    // Statistics tracking
+    struct Stats {
+        long forced_entries = 0;           // Entries forced at min_volume
+        long max_position_blocks = 0;      // Entries blocked by max_positions
+        long margin_level_blocks = 0;      // Entries blocked by margin_level_floor
+        int peak_positions = 0;            // Maximum positions reached
     };
 
     FillUpOscillation(double survive_pct, double base_spacing,
@@ -53,7 +77,8 @@ public:
                       double antifragile_scale = 0.1,      // 10% more per 5% DD
                       double velocity_threshold = 30.0,     // $30/hour = crash
                       double volatility_lookback_hours = 4.0,
-                      AdaptiveConfig adaptive_config = AdaptiveConfig())
+                      AdaptiveConfig adaptive_config = AdaptiveConfig(),
+                      SafetyConfig safety_config = SafetyConfig())
         : survive_pct_(survive_pct),
           base_spacing_(base_spacing),
           min_volume_(min_volume),
@@ -65,6 +90,7 @@ public:
           velocity_threshold_(velocity_threshold),
           volatility_lookback_hours_(volatility_lookback_hours),
           adaptive_config_(adaptive_config),
+          safety_config_(safety_config),
           lowest_buy_(DBL_MAX),
           highest_buy_(DBL_MIN),
           volume_of_open_trades_(0.0),
@@ -117,6 +143,10 @@ public:
         if (peak_equity_ == 0.0) {
             peak_equity_ = current_equity_;
             hour_start_price_ = current_bid_;
+            // Set initial spacing from first price when using percentage mode
+            if (adaptive_config_.pct_spacing) {
+                current_spacing_ = current_bid_ * (base_spacing_ / 100.0);
+            }
         }
 
         // Update peak
@@ -180,6 +210,10 @@ public:
     double GetThreshWeak() const { return thresh_weak_; }
     int GetWarmupSamples() const { return (int)trend_history_.size(); }
 
+    // Safety statistics
+    const Stats& GetStats() const { return stats_; }
+    void SetSafetyConfig(const SafetyConfig& config) { safety_config_ = config; }
+
 private:
     // Base parameters
     double survive_pct_;
@@ -197,6 +231,10 @@ private:
 
     // Configurable adaptive spacing parameters
     AdaptiveConfig adaptive_config_;
+
+    // Safety configuration and stats
+    SafetyConfig safety_config_;
+    Stats stats_;
 
     // Position tracking
     double lowest_buy_;
@@ -333,11 +371,26 @@ private:
             vol_ratio = std::max(adaptive_config_.min_spacing_mult,
                                  std::min(adaptive_config_.max_spacing_mult, vol_ratio));
 
-            double new_spacing = base_spacing_ * vol_ratio;
-            new_spacing = std::max(adaptive_config_.min_spacing_abs,
-                                   std::min(adaptive_config_.max_spacing_abs, new_spacing));
+            // Compute effective base spacing and clamps
+            double effective_base, min_abs, max_abs, change_thresh;
+            if (adaptive_config_.pct_spacing) {
+                // Percentage mode: all spacing values scale with current price
+                effective_base = current_bid_ * (base_spacing_ / 100.0);
+                min_abs = current_bid_ * (adaptive_config_.min_spacing_abs / 100.0);
+                max_abs = current_bid_ * (adaptive_config_.max_spacing_abs / 100.0);
+                change_thresh = current_bid_ * (adaptive_config_.spacing_change_threshold / 100.0);
+            } else {
+                // Absolute mode (original behavior)
+                effective_base = base_spacing_;
+                min_abs = adaptive_config_.min_spacing_abs;
+                max_abs = adaptive_config_.max_spacing_abs;
+                change_thresh = adaptive_config_.spacing_change_threshold;
+            }
 
-            if (std::abs(new_spacing - current_spacing_) > adaptive_config_.spacing_change_threshold) {
+            double new_spacing = effective_base * vol_ratio;
+            new_spacing = std::max(min_abs, std::min(max_abs, new_spacing));
+
+            if (std::abs(new_spacing - current_spacing_) > change_thresh) {
                 current_spacing_ = new_spacing;
                 adaptive_spacing_changes_++;
             }
@@ -545,7 +598,16 @@ private:
     }
 
     bool Open(double lots, TickBasedEngine& engine) {
-        if (lots < min_volume_) return false;
+        // Forced entry: if lot sizing returns 0 but force is enabled, use min_volume
+        // This "keeps the grid alive" and captures rebounds during margin stress
+        if (lots < min_volume_) {
+            if (safety_config_.force_min_volume_entry) {
+                lots = min_volume_;
+                stats_.forced_entries++;
+            } else {
+                return false;
+            }
+        }
 
         double final_lots = std::min(lots, max_volume_);
         final_lots = std::round(final_lots * 100.0) / 100.0;
@@ -556,7 +618,33 @@ private:
     }
 
     void OpenNew(TickBasedEngine& engine) {
-        int positions_total = engine.GetOpenPositions().size();
+        int positions_total = (int)engine.GetOpenPositions().size();
+
+        // Track peak positions
+        if (positions_total > stats_.peak_positions) {
+            stats_.peak_positions = positions_total;
+        }
+
+        // Safety: max position cap (alternative to blocking based on lot sizing)
+        if (safety_config_.max_positions > 0 && positions_total >= safety_config_.max_positions) {
+            stats_.max_position_blocks++;
+            return;
+        }
+
+        // Safety: margin level floor (calculate from equity and used margin)
+        if (safety_config_.margin_level_floor > 0) {
+            double used_margin = 0.0;
+            for (const Trade* trade : engine.GetOpenPositions()) {
+                used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
+            }
+            if (used_margin > 0) {
+                double margin_level = (current_equity_ / used_margin) * 100.0;
+                if (margin_level < safety_config_.margin_level_floor) {
+                    stats_.margin_level_blocks++;
+                    return;
+                }
+            }
+        }
 
         if (positions_total == 0) {
             double lots = CalculateLotSize(engine, positions_total);
