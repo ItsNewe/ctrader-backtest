@@ -2301,7 +2301,7 @@ MAX150 achieves **lower DD than baseline FORCE_OFF** with higher returns.
 | Risk-adjusted | 13% | ON | MAX150 | ~55x | ~59% |
 | Conservative | 13% | ON | MAX100 | ~40x | ~55% |
 
-**Note**: CombinedJu strategy (Rubber Band TP + Velocity + Barbell) is a separate strategy from FillUpOscillation modes. The original forced entry discovery (13.37x → 22.22x, +66%) was on CombinedJu.
+**Note**: CombinedJu strategy (Rubber Band TP + Velocity + Barbell) is a separate strategy from FillUpOscillation modes. CombinedJu **already has forced entry built-in** (`lots = std::max(lots, min_volume)`), which is why it outperforms. JU_BARBELL achieves **105.57x** 2-year sequential.
 
 ### Strategies Updated with Forced Entry + Safety Mechanisms
 
@@ -2364,3 +2364,179 @@ strategy_wuwei.h
 ```
 
 Update these if they are used in production.
+
+### Forced Entry on V4, V5, and CombinedJu Strategies (2026-01-27)
+
+Testing forced entry across alternative strategy implementations:
+
+#### V4 (FillUpStrategyV4)
+
+| Year | NoForce | Force | Change | DD |
+|------|---------|-------|--------|-----|
+| 2024 | 1.26x | 1.26x | **0%** | 21.9% |
+| 2025 | 3.11x | 3.11x | **0%** | 26.3% |
+
+**Result: No impact.** V4 uses fixed `min_volume` sizing, not margin-based sizing. Lot size is always `min_volume`, so forced entry doesn't apply.
+
+#### V5 (FillUpStrategyV5 - SMA Filter)
+
+| Year | NoForce | Force | Change | NoForce DD | Force DD |
+|------|---------|-------|--------|------------|----------|
+| 2024 | **0.80x** | **2.28x** | **+184%** | 82.0% | **18.3%** |
+| 2025 | **1.98x** | **4.02x** | **+103%** | 98.6% | **39.2%** |
+
+**Result: MASSIVE benefit!** V5 uses margin-based sizing that often returns 0 (especially when SMA filter restricts entries). Forced entry transforms V5 from a **losing strategy** (0.80x in 2024) to a **profitable one** (2.28x), with DD dropping from 82% to 18%.
+
+**V5 + Force** 2-year sequential: **9.17x** (2.28x × 4.02x)
+
+#### CombinedJu Strategy
+
+| Variant | Year | NoForce | Force | Change |
+|---------|------|---------|-------|--------|
+| JU_FULL (default) | 2024 | 4.10x | 4.10x | 0% |
+| JU_FULL | 2025 | 18.07x | 18.07x | 0% |
+| JU_BARBELL | 2024 | 4.70x | 4.70x | 0% |
+| JU_BARBELL | 2025 | 22.48x | 22.48x | 0% |
+
+**Result: No impact.** CombinedJu **already has forced entry built-in** (`lots = std::max(lots, min_volume)`). Toggling the force flag has no effect.
+
+**Best CombinedJu variant**: JU_BARBELL with **105.57x** 2-year sequential (4.70x × 22.48x).
+
+#### Summary: Forced Entry by Strategy Type
+
+| Strategy | Impact | Reason |
+|----------|--------|--------|
+| **FillUpOscillation ADAPTIVE** | +144% to +204% | Margin-based sizing often returns 0 |
+| **V5 (SMA Filter)** | +103% to +184% | SMA filter + margin sizing = many 0-lot events |
+| V4 | No impact | Uses fixed min_volume, not margin-based |
+| CombinedJu | No impact | Already forces min_volume internally |
+| Fixed-spacing modes | **DESTROYS** | Spacing too tight at high prices → stop-out |
+
+#### V5 Requires Forced Entry
+
+**V5 without forced entry is practically unusable** (0.80x in 2024 = 20% loss). The SMA trend filter blocks entries during good times, and when it finally allows entry, margin-based sizing often returns 0. Forced entry is **mandatory** for V5.
+
+MT5 EA for V5 should have:
+```mql5
+input bool ForceMinVolumeEntry = true;  // REQUIRED for V5 to work!
+```
+
+---
+
+## 20. CombinedJu Parameter Sweep (2026-01-27)
+
+### Overview
+
+CombinedJu combines three concepts:
+1. **Rubber Band TP** - TP scales with deviation from first entry (SQRT or LINEAR)
+2. **Velocity Zero Filter (Wu Wei)** - Enter only when price velocity is near zero (local minima)
+3. **Barbell/Threshold Sizing** - Larger lots at deeper deviations
+
+**Test file**: `validation/test_combinedju_sweep.cpp` (164 configurations, parallel)
+
+### Top Performers (2025 XAUUSD)
+
+| Rank | Config | Return | MaxDD | Trades | Settings |
+|------|--------|--------|-------|--------|----------|
+| 1 | s12_sp1.0_tpSQR_szTHR_v0 | **41.87x** | 83.4% | 61,300 | SQRT TP, THRESHOLD, vel OFF |
+| 2 | s12_sp1.0_tpSQR_szTHR_v1 | **41.69x** | **80.7%** | 56,904 | SQRT TP, THRESHOLD, vel ON |
+| 3 | s12_sp1.0_tpLIN_szTHR_v1 | **39.26x** | 82.4% | 23,472 | LINEAR TP, THRESHOLD, vel ON |
+| 4 | s12_sp1.0_tpLIN_szTHR_v0 | 37.00x | 84.8% | 25,157 | LINEAR TP, THRESHOLD, vel OFF |
+| 5 | s12_sp1.0_tpSQR_szUNI_v0 | 35.49x | 81.0% | 61,300 | SQRT TP, UNIFORM, vel OFF |
+
+### CRITICAL: LINEAR_SIZING DESTROYS THE STRATEGY
+
+| Sizing Mode | Average Return | Result |
+|-------------|----------------|--------|
+| **THRESHOLD** | **24.57x** | Best |
+| UNIFORM | 19.36x | Good |
+| **LINEAR** | **0.03x** | **97% LOSS - NEVER USE!** |
+
+**Why LINEAR fails**: `lots = base * (1 + pos_num * scale)` increases lot sizes continuously as positions accumulate, causing massive overleveraging and stop-out.
+
+**THRESHOLD is safe**: Only increases lots after N positions (barbell effect), not continuous scaling.
+
+### Parameter Impact Analysis
+
+| Parameter | Best Value | Avg Return | Notes |
+|-----------|------------|------------|-------|
+| **survive_pct** | **12%** | 21.19x | 33% better than 13% (15.92x) |
+| **tp_mode** | **SQRT** | 17.11x | 60% better than FIXED (10.72x) |
+| **sizing_mode** | **THRESHOLD** | 24.57x | LINEAR = 0.03x (disaster!) |
+| **base_spacing** | **$1.00** | Dominates top 10 | Matches median oscillation amplitude |
+| **velocity_filter** | Marginal | ON: 15.18x, OFF: 14.13x | Small effect, helps DD slightly |
+
+### Best Risk-Adjusted Configurations
+
+| Config | Return | MaxDD | Risk-Adj Score |
+|--------|--------|-------|----------------|
+| s12_sp1.0_tpSQR_szTHR_v1 | 41.69x | 80.7% | **51.01** |
+| s12_sp1.0_tpSQR_szTHR_v0 | 41.87x | 83.4% | 49.62 |
+| s12_sp1.0_tpLIN_szTHR_v1 | 39.26x | 82.4% | 47.08 |
+| s13_sp1.0_tpSQR_szTHR_v0 | 30.85x | 69.8% | 43.58 |
+
+**Velocity filter ON** provides slightly better risk-adjusted return (lower DD for similar return).
+
+### Parameter Derivability
+
+| Parameter | Can Derive? | How |
+|-----------|-------------|-----|
+| **base_spacing** | Yes | = Median oscillation amplitude (~$1.00 for XAUUSD) |
+| **typical_vol_pct** | Yes | = Median N-hour range / price (0.55% for 4h XAUUSD) |
+| **volatility_lookback** | Yes | Stability test (4h for XAUUSD, 1h for XAGUSD) |
+| **tp_min** | Yes | = base_spacing |
+| **velocity_threshold_pct** | Yes | From tick velocity distribution (P50 of |velocity|) |
+| **velocity_window** | Yes | = desired_seconds × ticks_per_second |
+| **sizing_threshold_pos** | Partial | Depends on typical DD depth (5 is robust) |
+| tp_sqrt_scale | Sweep | 0.5-0.7 range works well |
+| tp_linear_scale | Sweep | 0.2-0.3 range works well |
+| sizing_threshold_mult | Risk choice | 2.0-3.0 (higher = more aggressive) |
+
+### Recommended Configuration
+
+```cpp
+// CombinedJu optimal settings for XAUUSD
+StrategyCombinedJu::Config cfg;
+cfg.survive_pct = 12.0;                      // 12% optimal
+cfg.base_spacing = 1.0;                      // Match median oscillation
+cfg.tp_mode = StrategyCombinedJu::SQRT;      // SQRT outperforms
+cfg.tp_sqrt_scale = 0.5;
+cfg.tp_min = 1.0;
+cfg.enable_velocity_filter = true;           // Slightly better risk-adjusted
+cfg.velocity_window = 10;
+cfg.velocity_threshold_pct = 0.01;
+cfg.sizing_mode = StrategyCombinedJu::THRESHOLD_SIZING;  // NEVER LINEAR!
+cfg.sizing_threshold_pos = 5;
+cfg.sizing_threshold_mult = 2.0;
+cfg.volatility_lookback_hours = 4.0;
+cfg.typical_vol_pct = 0.55;
+```
+
+### MT5 EA and Presets
+
+| File | Description |
+|------|-------------|
+| `mt5/CombinedJu_EA.mq5` | Full CombinedJu implementation |
+| `mt5/Presets/CombinedJu_XAUUSD_Best.set` | Config #1: 41.87x, vel OFF |
+| `mt5/Presets/CombinedJu_XAUUSD_VelocityFilter.set` | Config #2: 41.69x, vel ON (lower DD) |
+| `mt5/Presets/CombinedJu_XAUUSD_LinearTP.set` | Config #3: 39.26x, LINEAR TP |
+
+### CombinedJu vs FillUpOscillation
+
+| Strategy | Best 2025 Return | Max DD | Key Advantage |
+|----------|------------------|--------|---------------|
+| **CombinedJu** (SQRT+THRESH) | **41.87x** | 83.4% | Rubber band TP + barbell sizing |
+| FillUpOscillation ADAPTIVE 12% | 100.72x* | 81.3% | Simpler, forced entry |
+| JU_BARBELL (2-year) | 105.57x | ~68% | Best 2-year sequential |
+
+*Note: FillUpOscillation 100.72x is 2-year sequential; CombinedJu 41.87x is 2025 only.
+
+**CombinedJu advantages**:
+- Rubber band TP captures larger profits on deep deviations
+- Velocity filter improves entry timing
+- Threshold sizing amplifies best entries
+
+**FillUpOscillation advantages**:
+- Simpler (fewer parameters)
+- Forced entry discovery applies directly
+- Higher single-year returns with ADAPTIVE mode

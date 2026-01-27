@@ -2429,3 +2429,21 @@ target_compile_options(test_forced_entry_features PRIVATE -O3)
 target_link_libraries(test_forced_entry_features PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
 set_target_properties(test_forced_entry_features PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
 message(STATUS "Forced entry features test configured: test_forced_entry_features")
+
+# Test V4, V5, and CombinedJu with forced entry
+add_executable(test_v4_v5_combinedju_forced test_v4_v5_combinedju_forced.cpp)
+target_include_directories(test_v4_v5_combinedju_forced PRIVATE ../include)
+target_compile_features(test_v4_v5_combinedju_forced PRIVATE cxx_std_17)
+target_compile_options(test_v4_v5_combinedju_forced PRIVATE -O3)
+target_link_libraries(test_v4_v5_combinedju_forced PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_v4_v5_combinedju_forced PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "V4/V5/CombinedJu forced entry test configured: test_v4_v5_combinedju_forced")
+
+# CombinedJu parameter sweep
+add_executable(test_combinedju_sweep test_combinedju_sweep.cpp)
+target_include_directories(test_combinedju_sweep PRIVATE ../include)
+target_compile_features(test_combinedju_sweep PRIVATE cxx_std_17)
+target_compile_options(test_combinedju_sweep PRIVATE -O3)
+target_link_libraries(test_combinedju_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_combinedju_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "CombinedJu sweep test configured: test_combinedju_sweep")
