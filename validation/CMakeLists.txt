@@ -1741,6 +1741,30 @@ set_target_properties(test_dd_reduction PROPERTIES
 
 message(STATUS "DD Reduction sweep configured: test_dd_reduction")
 
+# Rubber Band TP Sweep (parallel)
+add_executable(test_rubberband_tp
+    test_rubberband_tp.cpp
+)
+
+target_include_directories(test_rubberband_tp PRIVATE
+    ../include
+)
+
+target_compile_features(test_rubberband_tp PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_rubberband_tp PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_rubberband_tp PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_rubberband_tp PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_rubberband_tp PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+message(STATUS "Rubber Band TP sweep configured: test_rubberband_tp")
+
 # XAGUSD FillUpStrategy Spacing Sweep (parallel)
 add_executable(test_xagusd_spacing_sweep
     test_xagusd_spacing_sweep.cpp
@@ -2024,3 +2048,303 @@ endif()
 set_target_properties(test_auto_calibration PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
 )
+
+# XAUUSD Deep Parameter Sweep (parallel, ~3200 configs)
+add_executable(test_xauusd_deep_sweep
+    test_xauusd_deep_sweep.cpp
+)
+
+target_include_directories(test_xauusd_deep_sweep PRIVATE
+    ../include
+)
+
+target_compile_features(test_xauusd_deep_sweep PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_xauusd_deep_sweep PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_xauusd_deep_sweep PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_xauusd_deep_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_xauusd_deep_sweep PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+
+# Wide Spacing Analysis - Trend vs Oscillation Investigation
+add_executable(test_wide_spacing_analysis
+    test_wide_spacing_analysis.cpp
+)
+
+target_include_directories(test_wide_spacing_analysis PRIVATE
+    ../include
+)
+
+target_compile_features(test_wide_spacing_analysis PRIVATE cxx_std_17)
+
+if(MSVC)
+    target_compile_options(test_wide_spacing_analysis PRIVATE /W4 /O2)
+else()
+    target_compile_options(test_wide_spacing_analysis PRIVATE -Wall -Wextra -O3)
+    target_link_libraries(test_wide_spacing_analysis PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+
+set_target_properties(test_wide_spacing_analysis PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
+)
+add_executable(test_small_spacing test_small_spacing.cpp)
+target_include_directories(test_small_spacing PRIVATE ../include)
+target_compile_features(test_small_spacing PRIVATE cxx_std_17)
+target_compile_options(test_small_spacing PRIVATE -O3)
+target_link_libraries(test_small_spacing PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_small_spacing PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+add_executable(test_small_spacing_regime test_small_spacing_regime.cpp)
+target_include_directories(test_small_spacing_regime PRIVATE ../include)
+target_compile_features(test_small_spacing_regime PRIVATE cxx_std_17)
+target_compile_options(test_small_spacing_regime PRIVATE -O3)
+target_link_libraries(test_small_spacing_regime PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_small_spacing_regime PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+add_executable(test_pct_spacing_regime test_pct_spacing_regime.cpp)
+target_include_directories(test_pct_spacing_regime PRIVATE ../include)
+target_compile_features(test_pct_spacing_regime PRIVATE cxx_std_17)
+target_compile_options(test_pct_spacing_regime PRIVATE -O3)
+target_link_libraries(test_pct_spacing_regime PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_pct_spacing_regime PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+add_executable(test_pct_regime_parallel test_pct_regime_parallel.cpp)
+target_include_directories(test_pct_regime_parallel PRIVATE ../include)
+target_compile_features(test_pct_regime_parallel PRIVATE cxx_std_17)
+target_compile_options(test_pct_regime_parallel PRIVATE -O3)
+target_link_libraries(test_pct_regime_parallel PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_pct_regime_parallel PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+add_executable(test_sweetspot_sweep test_sweetspot_sweep.cpp)
+target_include_directories(test_sweetspot_sweep PRIVATE ../include)
+target_compile_features(test_sweetspot_sweep PRIVATE cxx_std_17)
+target_compile_options(test_sweetspot_sweep PRIVATE -O3)
+target_link_libraries(test_sweetspot_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_sweetspot_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+
+# Edge of Chaos Parameter Investigation
+add_executable(test_edge_of_chaos test_edge_of_chaos.cpp)
+target_include_directories(test_edge_of_chaos PRIVATE ../include)
+target_compile_features(test_edge_of_chaos PRIVATE cxx_std_17)
+target_compile_options(test_edge_of_chaos PRIVATE -O3)
+target_link_libraries(test_edge_of_chaos PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_edge_of_chaos PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Edge of chaos test configured: test_edge_of_chaos")
+
+# Floating Attractor Grid - Chaos Concept #1
+add_executable(test_floating_attractor test_floating_attractor.cpp)
+target_include_directories(test_floating_attractor PRIVATE ../include)
+target_compile_features(test_floating_attractor PRIVATE cxx_std_17)
+target_compile_options(test_floating_attractor PRIVATE -O3)
+target_link_libraries(test_floating_attractor PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_floating_attractor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Floating attractor grid test configured: test_floating_attractor")
+
+# Entropy Export Strategy - Chaos Concept #6 (Dissipative Structures)
+add_executable(test_entropy_export test_entropy_export.cpp)
+target_include_directories(test_entropy_export PRIVATE ../include)
+target_compile_features(test_entropy_export PRIVATE cxx_std_17)
+target_compile_options(test_entropy_export PRIVATE -O3)
+target_link_libraries(test_entropy_export PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_entropy_export PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Entropy export strategy test configured: test_entropy_export")
+
+# Noise Scaling Strategy - Chaos Concept #8 (Noise as Signal Carrier)
+add_executable(test_noise_scaling test_noise_scaling.cpp)
+target_include_directories(test_noise_scaling PRIVATE ../include)
+target_compile_features(test_noise_scaling PRIVATE cxx_std_17)
+target_compile_options(test_noise_scaling PRIVATE -O3)
+target_link_libraries(test_noise_scaling PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_noise_scaling PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Noise scaling strategy test configured: test_noise_scaling")
+
+
+# Fractal Grid Multi-Scale Strategy Test - Chaos Concept #7
+add_executable(test_fractal_grid test_fractal_grid.cpp)
+target_include_directories(test_fractal_grid PRIVATE ../include)
+target_compile_features(test_fractal_grid PRIVATE cxx_std_17)
+target_compile_options(test_fractal_grid PRIVATE -O3)
+target_link_libraries(test_fractal_grid PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_fractal_grid PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Fractal grid test configured: test_fractal_grid")
+
+# OGY Chaos Control Strategy - Chaos Concept #4
+add_executable(test_ogy_control test_ogy_control.cpp)
+target_include_directories(test_ogy_control PRIVATE ../include)
+target_compile_features(test_ogy_control PRIVATE cxx_std_17)
+target_compile_options(test_ogy_control PRIVATE -O3)
+target_link_libraries(test_ogy_control PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_ogy_control PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "OGY chaos control test configured: test_ogy_control")
+
+# Chaos Synchronization - Gold/Silver Ratio Mean-Reversion
+add_executable(test_chaos_sync test_chaos_sync.cpp)
+target_include_directories(test_chaos_sync PRIVATE ../include)
+target_compile_features(test_chaos_sync PRIVATE cxx_std_17)
+target_compile_options(test_chaos_sync PRIVATE -O3)
+target_link_libraries(test_chaos_sync PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_chaos_sync PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Chaos synchronization test configured: test_chaos_sync")
+
+# Bifurcation Detection - Chaos Concept #5 (Regime Transition Detection)
+add_executable(test_bifurcation test_bifurcation.cpp)
+target_include_directories(test_bifurcation PRIVATE ../include)
+target_compile_features(test_bifurcation PRIVATE cxx_std_17)
+target_compile_options(test_bifurcation PRIVATE -O3)
+target_link_libraries(test_bifurcation PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_bifurcation PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Bifurcation detection test configured: test_bifurcation")
+
+# Entropy Export V2 - Time and Loss based loser cutting (Dissipative Structures)
+add_executable(test_entropy_export_v2 test_entropy_export_v2.cpp)
+target_include_directories(test_entropy_export_v2 PRIVATE ../include)
+target_compile_features(test_entropy_export_v2 PRIVATE cxx_std_17)
+target_compile_options(test_entropy_export_v2 PRIVATE -O3)
+target_link_libraries(test_entropy_export_v2 PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_entropy_export_v2 PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Entropy export v2 test configured: test_entropy_export_v2")
+
+# Combined Chaos Strategy - Floating Attractor + Velocity Zero-Crossing + Edge-of-Chaos
+add_executable(test_combined_chaos test_combined_chaos.cpp)
+target_include_directories(test_combined_chaos PRIVATE ../include)
+target_compile_features(test_combined_chaos PRIVATE cxx_std_17)
+target_compile_options(test_combined_chaos PRIVATE -O3)
+target_link_libraries(test_combined_chaos PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_combined_chaos PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Combined chaos strategy test configured: test_combined_chaos")
+
+# Ornstein-Uhlenbeck Mean-Reversion Strategy Test
+add_executable(test_ornstein_uhlenbeck test_ornstein_uhlenbeck.cpp)
+target_include_directories(test_ornstein_uhlenbeck PRIVATE ../include)
+target_compile_features(test_ornstein_uhlenbeck PRIVATE cxx_std_17)
+target_compile_options(test_ornstein_uhlenbeck PRIVATE -O3)
+target_link_libraries(test_ornstein_uhlenbeck PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_ornstein_uhlenbeck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "OU mean-reversion test configured: test_ornstein_uhlenbeck")
+
+# Kalman Filter Dynamic Attractor Strategy - Optimal price estimation from noisy ticks
+add_executable(test_kalman_filter test_kalman_filter.cpp)
+target_include_directories(test_kalman_filter PRIVATE ../include)
+target_compile_features(test_kalman_filter PRIVATE cxx_std_17)
+target_compile_options(test_kalman_filter PRIVATE -O3)
+target_link_libraries(test_kalman_filter PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_kalman_filter PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Kalman filter strategy test configured: test_kalman_filter")
+
+# Regime-Switching (HMM-inspired) Strategy Parallel Sweep
+add_executable(test_regime_switching test_regime_switching.cpp)
+target_include_directories(test_regime_switching PRIVATE ../include)
+target_compile_features(test_regime_switching PRIVATE cxx_std_17)
+target_compile_options(test_regime_switching PRIVATE -O3)
+target_link_libraries(test_regime_switching PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_regime_switching PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Regime-switching strategy test configured: test_regime_switching")
+
+# Adaptive Control Strategy (Self-Tuning Parameters) Parallel Sweep
+add_executable(test_adaptive_control test_adaptive_control.cpp)
+target_include_directories(test_adaptive_control PRIVATE ../include)
+target_compile_features(test_adaptive_control PRIVATE cxx_std_17)
+target_compile_options(test_adaptive_control PRIVATE -O3)
+target_link_libraries(test_adaptive_control PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_adaptive_control PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Adaptive control strategy test configured: test_adaptive_control")
+
+# Adaptive Control Strategy Quick Sweep
+add_executable(test_adaptive_control_quick test_adaptive_control_quick.cpp)
+target_include_directories(test_adaptive_control_quick PRIVATE ../include)
+target_compile_features(test_adaptive_control_quick PRIVATE cxx_std_17)
+target_compile_options(test_adaptive_control_quick PRIVATE -O3)
+target_link_libraries(test_adaptive_control_quick PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_adaptive_control_quick PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Adaptive control quick test configured: test_adaptive_control_quick")
+
+# Van der Pol Oscillator Phase-Based Trading Parallel Sweep
+add_executable(test_vanderpol test_vanderpol.cpp)
+target_include_directories(test_vanderpol PRIVATE ../include)
+target_compile_features(test_vanderpol PRIVATE cxx_std_17)
+target_compile_options(test_vanderpol PRIVATE -O3)
+target_link_libraries(test_vanderpol PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_vanderpol PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Van der Pol oscillator test configured: test_vanderpol")
+
+# Barbell Sizing Strategy - Taleb's Asymmetric Sizing (Ju Concept #1)
+add_executable(test_barbell_sizing test_barbell_sizing.cpp)
+target_include_directories(test_barbell_sizing PRIVATE ../include)
+target_compile_features(test_barbell_sizing PRIVATE cxx_std_17)
+target_compile_options(test_barbell_sizing PRIVATE -O3)
+target_link_libraries(test_barbell_sizing PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_barbell_sizing PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Barbell sizing strategy test configured: test_barbell_sizing")
+
+
+# Via Negativa Strategy - Taleb's Improvement by Removal (Ju Concept #3)
+add_executable(test_via_negativa test_via_negativa.cpp)
+target_include_directories(test_via_negativa PRIVATE ../include)
+target_compile_features(test_via_negativa PRIVATE cxx_std_17)
+target_compile_options(test_via_negativa PRIVATE -O3)
+target_link_libraries(test_via_negativa PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_via_negativa PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Via Negativa strategy test configured: test_via_negativa")
+
+
+# Reflexivity Strategy - Soros's Feedback Loops (Ju Concept #4)
+add_executable(test_reflexivity test_reflexivity.cpp)
+target_include_directories(test_reflexivity PRIVATE ../include)
+target_compile_features(test_reflexivity PRIVATE cxx_std_17)
+target_compile_options(test_reflexivity PRIVATE -O3)
+target_link_libraries(test_reflexivity PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_reflexivity PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Reflexivity strategy test configured: test_reflexivity")
+
+
+# Wu Wei Strategy - Effortless Action (Ju Concept #5)
+add_executable(test_wuwei test_wuwei.cpp)
+target_include_directories(test_wuwei PRIVATE ../include)
+target_compile_features(test_wuwei PRIVATE cxx_std_17)
+target_compile_options(test_wuwei PRIVATE -O3)
+target_link_libraries(test_wuwei PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_wuwei PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Wu Wei strategy test configured: test_wuwei")
+
+
+# Combined Ju Strategy - All three promising concepts together
+add_executable(test_combined_ju test_combined_ju.cpp)
+target_include_directories(test_combined_ju PRIVATE ../include)
+target_compile_features(test_combined_ju PRIVATE cxx_std_17)
+target_compile_options(test_combined_ju PRIVATE -O3)
+target_link_libraries(test_combined_ju PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_combined_ju PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Combined Ju strategy test configured: test_combined_ju")
+
+
+# Combined Ju Strategy Sweep - Find optimal parameters
+add_executable(test_combined_ju_sweep test_combined_ju_sweep.cpp)
+target_include_directories(test_combined_ju_sweep PRIVATE ../include)
+target_compile_features(test_combined_ju_sweep PRIVATE cxx_std_17)
+target_compile_options(test_combined_ju_sweep PRIVATE -O3)
+target_link_libraries(test_combined_ju_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_combined_ju_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Combined Ju sweep test configured: test_combined_ju_sweep")
+
+# Combined Ju regime validation (2024 vs 2025)
+add_executable(test_combined_ju_regime test_combined_ju_regime.cpp)
+target_include_directories(test_combined_ju_regime PRIVATE ../include)
+target_compile_features(test_combined_ju_regime PRIVATE cxx_std_17)
+target_compile_options(test_combined_ju_regime PRIVATE -O3)
+target_link_libraries(test_combined_ju_regime PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_combined_ju_regime PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Combined Ju regime test configured: test_combined_ju_regime")
+
+# EA comparison: v4 vs v5 vs CombinedJu
+add_executable(test_ea_comparison test_ea_comparison.cpp)
+target_include_directories(test_ea_comparison PRIVATE ../include)
+target_compile_features(test_ea_comparison PRIVATE cxx_std_17)
+target_compile_options(test_ea_comparison PRIVATE -O3)
+target_link_libraries(test_ea_comparison PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_ea_comparison PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "EA comparison test configured: test_ea_comparison")

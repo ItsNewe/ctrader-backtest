@@ -1,0 +1,30 @@
+; FillUp_CombinedJu preset: FULL_JU_THR3
+; Backtest: 18.61x return, 68.5% DD (2025)
+; Threshold at position 3, multiplier 2.0x (more aggressive)
+;
+; Use for: XAUUSD with 1:500 leverage
+; Note: Earlier threshold = slightly higher return but slightly higher DD
+
+SurvivePct=13.0
+BaseSpacing=1.5
+MinVolume=0.01
+MaxVolume=10.0
+
+VolatilityLookbackHours=4.0
+TypicalVolPct=0.55
+MinSpacingMult=0.5
+MaxSpacingMult=3.0
+
+EnableRubberBandTP=true
+TPSqrtScale=0.5
+TPMinimum=1.5
+
+EnableVelocityFilter=true
+VelocityWindow=10
+VelocityThresholdPct=0.01
+
+EnableBarbellSizing=true
+BarbellThresholdPos=3
+BarbellMultiplier=2.0
+
+MagicNumber=789003

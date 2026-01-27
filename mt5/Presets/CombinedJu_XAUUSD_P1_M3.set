@@ -1,0 +1,32 @@
+; FillUp_CombinedJu preset: P1_M3 (Maximum Return)
+; Backtest: 21.99x return, 72.6% DD (2025)
+; Backtest: 126x over 2 years (2024+2025)
+; Threshold at position 1, multiplier 3.0x (most aggressive)
+;
+; Use for: XAUUSD with 1:500 leverage
+; WARNING: Higher DD than THR/THR3 configs - use with caution
+; Recommended for accounts that can tolerate 70%+ drawdown
+
+SurvivePct=13.0
+BaseSpacing=1.5
+MinVolume=0.01
+MaxVolume=10.0
+
+VolatilityLookbackHours=4.0
+TypicalVolPct=0.55
+MinSpacingMult=0.5
+MaxSpacingMult=3.0
+
+EnableRubberBandTP=true
+TPSqrtScale=0.5
+TPMinimum=1.5
+
+EnableVelocityFilter=true
+VelocityWindow=10
+VelocityThresholdPct=0.01
+
+EnableBarbellSizing=true
+BarbellThresholdPos=1
+BarbellMultiplier=3.0
+
+MagicNumber=789013
