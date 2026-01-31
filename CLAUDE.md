@@ -19,7 +19,8 @@ Precise and correct. Evidence-based. Assumptions stated.
 6. [Validated Dead Ends](#6-validated-dead-ends)
 7. [MT5 Reference](#7-mt5-reference)
 8. [Test Files](#8-test-files)
-9. [Quick Reference](#9-quick-reference)
+9. [Advanced Features](#9-advanced-features)
+10. [Quick Reference](#10-quick-reference)
 
 **Archives** (detailed investigation logs):
 - `.claude/memory/ARCHIVE_INVESTIGATIONS.md` - Research findings
@@ -319,7 +320,379 @@ LoadTickDataOnce(path);  // ~60s for 52M ticks
 
 ---
 
-## 9. Quick Reference
+## 9. Advanced Features
+
+### Walk-Forward Optimization
+
+Prevents overfitting by testing on out-of-sample data windows.
+
+```cpp
+#include "walk_forward.h"
+
+WalkForwardConfig wf_config;
+wf_config.total_start = "2024.01.01";
+wf_config.total_end = "2025.12.31";
+wf_config.is_window_days = 90;      // In-sample: optimize
+wf_config.oos_window_days = 30;     // Out-of-sample: validate
+wf_config.step_days = 30;           // Roll forward monthly
+wf_config.num_threads = 16;
+
+// Define parameter ranges to optimize
+std::vector<ParamRange> ranges = {
+    {"survive_pct", 10.0, 15.0, 1.0},
+    {"base_spacing", 1.0, 2.0, 0.25}
+};
+
+WalkForwardOptimizer<FillUpOscillation> optimizer(wf_config, ranges);
+auto result = optimizer.Run(ticks, backtest_config);
+
+// result.robustness_score: 0-100 (>70 = robust)
+// result.oos_total_profit: realistic expectation
+// result.degradation_pct: IS vs OOS gap
+```
+
+**Interpretation:**
+- Robustness >70: Strategy generalizes well
+- Degradation <30%: Minimal overfitting
+- OOS profit: Use this for realistic expectations
+
+### Monte Carlo Simulation
+
+Assesses strategy robustness through randomization.
+
+```cpp
+#include "monte_carlo.h"
+
+MonteCarloConfig mc_config;
+mc_config.num_simulations = 1000;
+mc_config.mode = MonteCarloMode::COMBINED;
+mc_config.enable_shuffle = true;
+mc_config.enable_slippage = true;
+mc_config.slippage_stddev_points = 0.3;
+
+MonteCarloSimulator sim(mc_config);
+auto result = sim.Run(trades, initial_balance, true);
+
+// Key outputs:
+// result.profit_5th_percentile  - Worst-case (use for sizing)
+// result.probability_of_loss    - Risk metric
+// result.confidence_level       - HIGH/MEDIUM/LOW
+```
+
+**Modes:**
+| Mode | Purpose |
+|------|---------|
+| SHUFFLE_TRADES | Test sequence dependence |
+| SKIP_TRADES | Simulate missed entries (10%) |
+| VARY_SLIPPAGE | Execution quality sensitivity |
+| BOOTSTRAP | Statistical significance |
+| COMBINED | Worst realistic scenario |
+
+### Report Generation
+
+Generate professional HTML/CSV/JSON reports.
+
+```cpp
+#include "report_generator.h"
+
+ReportConfig report_cfg;
+report_cfg.title = "FillUpOscillation Backtest";
+report_cfg.output_dir = "./reports";
+report_cfg.formats = {ReportFormat::HTML, ReportFormat::CSV};
+report_cfg.include_trades = true;
+report_cfg.include_equity_curve = true;
+
+ReportGenerator generator(report_cfg);
+generator.Generate(backtest_results, trades, equity_curve);
+// Creates: reports/report.html, reports/trades.csv
+```
+
+**HTML Report Includes:**
+- Interactive equity curve (Chart.js)
+- Monthly breakdown table
+- Key metrics summary
+- Trade list (sortable)
+- Monte Carlo results (if provided)
+
+### Strategy Interface
+
+Clean API for implementing new strategies.
+
+```cpp
+#include "strategy_interface.h"
+
+class MyStrategy : public IStrategy {
+public:
+    void OnInit(StrategyContext& ctx) override {
+        // Initialize state
+    }
+
+    void OnTick(const Tick& tick, StrategyContext& ctx) override {
+        if (should_buy(tick)) {
+            ctx.Buy(0.01, tick.ask, tick.ask + 2.0);
+        }
+    }
+
+    std::string GetName() const override { return "MyStrategy"; }
+};
+
+// Register for factory loading
+REGISTER_STRATEGY(MyStrategy);
+```
+
+### Live Trading Bridge
+
+Run the **exact same strategy code** in backtest and live trading.
+
+```cpp
+#include "live_trading_bridge.h"
+
+// Strategy uses IMarketInterface - works with both:
+class GridStrategy {
+public:
+    void OnTick(const Tick& tick, IMarketInterface& market) {
+        if (should_buy(tick)) {
+            OrderRequest order;
+            order.symbol = "XAUUSD";
+            order.type = OrderType::MARKET_BUY;
+            order.lots = 0.01;
+            order.take_profit = tick.ask + 2.0;
+
+            auto result = market.SendOrder(order);
+        }
+    }
+};
+
+// BACKTEST mode:
+BacktestMarket::Config cfg;
+cfg.initial_balance = 10000.0;
+cfg.contract_size = 100.0;
+cfg.leverage = 500.0;
+BacktestMarket market(cfg);
+market.SetTicks(ticks);
+
+while (market.HasMoreTicks()) {
+    market.NextTick();
+    strategy.OnTick(market.GetCurrentTick("XAUUSD"), market);
+}
+
+// LIVE mode (same strategy code!):
+// MT5Market market("localhost:5555");  // Python bridge
+// strategy.OnTick(tick, market);
+```
+
+**TradingSession Safety Wrapper:**
+
+```cpp
+TradingSession::Config session_cfg;
+session_cfg.max_positions = 10;
+session_cfg.max_lots_per_symbol = 1.0;
+session_cfg.max_drawdown_pct = 25.0;
+session_cfg.max_consecutive_errors = 5;
+
+auto market_ptr = std::make_shared<BacktestMarket>(market);
+TradingSession session(market_ptr, session_cfg);
+session.Start();
+
+// Orders rejected if limits exceeded
+auto result = session.SendOrder(order);
+if (!result.success) {
+    // "Max positions reached" or "Max lots exceeded"
+}
+
+// Emergency stop
+session.GetKillSwitch().Trigger("Manual stop");
+```
+
+**Python MT5 Bridge (`bridge/mt5_bridge.py`):**
+
+```bash
+# Start bridge server
+python bridge/mt5_bridge.py --port 5555
+
+# Commands: connect, get_tick, get_account, get_positions,
+#           send_order, close_position, modify_position, close_all
+```
+
+**Key Files:**
+- `include/live_trading_bridge.h` - IMarketInterface, BacktestMarket, TradingSession
+- `bridge/mt5_bridge.py` - ZMQ bridge to MT5 terminal
+- `validation/test_live_bridge.cpp` - Usage examples
+
+### Incremental Results Writer
+
+Crash-safe parameter sweeps with resume capability.
+
+```cpp
+#include "sweep_results_writer.h"
+
+SweepResultsWriter writer("sweep_results.csv");
+writer.WriteHeader({"survive", "spacing", "profit", "dd"});
+
+for (auto& config : configs) {
+    auto result = run_backtest(config);
+    writer.WriteRow({config.survive, config.spacing,
+                     result.profit, result.max_dd});
+    // Results written immediately - safe to interrupt
+}
+
+// Resume after crash:
+SweepCheckpoint checkpoint("sweep_results.csv");
+size_t completed = checkpoint.GetCompletedCount();
+// Skip first 'completed' configs
+```
+
+### Portfolio Backtester
+
+Multi-symbol backtesting with synchronized tick processing.
+
+```cpp
+#include "portfolio_backtester.h"
+
+PortfolioConfig config;
+config.initial_balance = 100000.0;
+config.max_drawdown_pct = 30.0;
+config.max_total_positions = 100;
+
+// Add symbols
+config.symbols.push_back({"XAUUSD", "path/to/xauusd_ticks.csv", 100.0, 0.01});
+config.symbols.push_back({"XAGUSD", "path/to/xagusd_ticks.csv", 5000.0, 0.001});
+
+PortfolioBacktester backtester(config);
+backtester.LoadTickData();
+
+backtester.Run([](const MultiSymbolTick& tick, PortfolioBacktester& bt) {
+    // Strategy logic - access all symbols
+    if (tick.HasSymbol("XAUUSD") && bt.PositionCount("XAUUSD") == 0) {
+        bt.OpenPosition("XAUUSD", true, 0.01, 0, tick.Get("XAUUSD").ask + 2.0);
+    }
+});
+
+auto results = backtester.GetResults();
+results.Print();  // Shows per-symbol breakdown
+```
+
+### Correlation Analyzer
+
+Analyze strategy/symbol correlations for portfolio diversification.
+
+```cpp
+#include "correlation_analyzer.h"
+
+// Build correlation matrix from return series
+std::map<std::string, std::vector<double>> returns;
+returns["XAUUSD"] = xauusd_returns;
+returns["XAGUSD"] = xagusd_returns;
+
+auto matrix = CorrelationAnalyzer::BuildMatrix(returns);
+matrix.Print();
+
+// Find highly correlated pairs
+auto pairs = CorrelationAnalyzer::FindCorrelatedPairs(matrix, 0.7, true);
+
+// Diversification metrics
+std::map<std::string, double> weights = {{"XAUUSD", 0.6}, {"XAGUSD", 0.4}};
+auto div = CorrelationAnalyzer::CalculateDiversification(returns, weights);
+// div.diversification_ratio, div.effective_n, div.risk_contributions
+
+// Beta/Alpha analysis
+double beta = CorrelationAnalyzer::CalculateBeta(strategy_returns, benchmark);
+double alpha = CorrelationAnalyzer::CalculateAlpha(strategy_returns, benchmark);
+```
+
+### Risk Metrics Calculator
+
+Comprehensive risk analysis: VaR, CVaR, drawdown, tail risk.
+
+```cpp
+#include "risk_metrics.h"
+
+std::vector<double> daily_returns = {...};
+auto report = RiskMetricsCalculator::Calculate(returns, 0.02);  // 2% risk-free rate
+report.Print();
+
+// Key metrics:
+// report.var_95, report.var_99         - Value at Risk
+// report.cvar_95, report.cvar_99       - Expected Shortfall (CVaR)
+// report.max_drawdown                  - Maximum drawdown
+// report.sharpe_ratio, report.sortino_ratio
+// report.skewness, report.kurtosis     - Tail risk indicators
+
+// Individual VaR methods
+double hist_var = RiskMetricsCalculator::HistoricalVaR(returns, 0.95);
+double param_var = RiskMetricsCalculator::ParametricVaR(returns, 0.95);
+double es = RiskMetricsCalculator::ExpectedShortfall(returns, 0.95);
+```
+
+**Key Files:**
+- `include/portfolio_backtester.h` - Multi-symbol backtesting
+- `include/correlation_analyzer.h` - Correlation and diversification
+- `include/risk_metrics.h` - VaR, CVaR, drawdown, ratios
+- `validation/test_portfolio_risk.cpp` - Usage examples
+
+### Optimization Engine
+
+Parameter optimization with Grid Search, Genetic Algorithm, and Differential Evolution.
+
+```cpp
+#include "optimization_engine.h"
+
+// Define parameters to optimize
+std::vector<OptimizationParam> params = {
+    {"survive_pct", 8.0, 18.0, 2.0},   // min, max, step (grid)
+    {"spacing", 0.5, 3.0, 0.5},
+    {"lookback", 1.0, 8.0, 1.0, true}  // true = integer
+};
+
+// Fitness function - runs your strategy and returns metrics
+auto fitness = [](const std::map<std::string, double>& p) -> OptimizationResult {
+    OptimizationResult r;
+    r.params = p;
+    auto backtest = RunBacktest(p["survive_pct"], p["spacing"], p["lookback"]);
+    r.profit = backtest.profit;
+    r.max_drawdown = backtest.max_dd;
+    r.sharpe_ratio = backtest.sharpe;
+    r.total_trades = backtest.trades;
+    r.fitness = FitnessFunctions::CalmarFitness(r.profit, r.max_drawdown,
+                                                 r.sharpe_ratio, r.total_trades);
+    r.is_valid = true;
+    return r;
+};
+
+// Grid Search (exhaustive)
+OptimizationConfig config;
+config.num_threads = 16;
+GridSearchOptimizer grid(params, fitness, config);
+auto results = grid.Run();  // Returns sorted by fitness
+
+// Genetic Algorithm (continuous params)
+config.ga_population_size = 50;
+config.ga_generations = 100;
+GeneticOptimizer ga(params, fitness, config);
+auto best = ga.Run();
+
+// Differential Evolution (more robust)
+DifferentialEvolutionOptimizer de(params, fitness, config);
+auto best = de.Run();
+```
+
+**Fitness Functions:**
+```cpp
+// Built-in fitness functions
+FitnessFunctions::ProfitFitness(profit, dd, sharpe, trades);   // Maximize profit
+FitnessFunctions::SharpeFitness(profit, dd, sharpe, trades);   // Risk-adjusted
+FitnessFunctions::CalmarFitness(profit, dd, sharpe, trades);   // Return/DD ratio
+FitnessFunctions::CombinedFitness(profit, dd, sharpe, trades,
+    0.4, 0.3, 0.3);  // Weighted: profit, sharpe, low-DD
+```
+
+**Key Files:**
+- `include/optimization_engine.h` - All optimizers and fitness functions
+- `validation/test_optimization.cpp` - Usage examples
+
+---
+
+## 10. Quick Reference
 
 ### XAUUSD Parameters
 
