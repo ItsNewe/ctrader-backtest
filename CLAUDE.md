@@ -542,6 +542,94 @@ size_t completed = checkpoint.GetCompletedCount();
 // Skip first 'completed' configs
 ```
 
+### Portfolio Backtester
+
+Multi-symbol backtesting with synchronized tick processing.
+
+```cpp
+#include "portfolio_backtester.h"
+
+PortfolioConfig config;
+config.initial_balance = 100000.0;
+config.max_drawdown_pct = 30.0;
+config.max_total_positions = 100;
+
+// Add symbols
+config.symbols.push_back({"XAUUSD", "path/to/xauusd_ticks.csv", 100.0, 0.01});
+config.symbols.push_back({"XAGUSD", "path/to/xagusd_ticks.csv", 5000.0, 0.001});
+
+PortfolioBacktester backtester(config);
+backtester.LoadTickData();
+
+backtester.Run([](const MultiSymbolTick& tick, PortfolioBacktester& bt) {
+    // Strategy logic - access all symbols
+    if (tick.HasSymbol("XAUUSD") && bt.PositionCount("XAUUSD") == 0) {
+        bt.OpenPosition("XAUUSD", true, 0.01, 0, tick.Get("XAUUSD").ask + 2.0);
+    }
+});
+
+auto results = backtester.GetResults();
+results.Print();  // Shows per-symbol breakdown
+```
+
+### Correlation Analyzer
+
+Analyze strategy/symbol correlations for portfolio diversification.
+
+```cpp
+#include "correlation_analyzer.h"
+
+// Build correlation matrix from return series
+std::map<std::string, std::vector<double>> returns;
+returns["XAUUSD"] = xauusd_returns;
+returns["XAGUSD"] = xagusd_returns;
+
+auto matrix = CorrelationAnalyzer::BuildMatrix(returns);
+matrix.Print();
+
+// Find highly correlated pairs
+auto pairs = CorrelationAnalyzer::FindCorrelatedPairs(matrix, 0.7, true);
+
+// Diversification metrics
+std::map<std::string, double> weights = {{"XAUUSD", 0.6}, {"XAGUSD", 0.4}};
+auto div = CorrelationAnalyzer::CalculateDiversification(returns, weights);
+// div.diversification_ratio, div.effective_n, div.risk_contributions
+
+// Beta/Alpha analysis
+double beta = CorrelationAnalyzer::CalculateBeta(strategy_returns, benchmark);
+double alpha = CorrelationAnalyzer::CalculateAlpha(strategy_returns, benchmark);
+```
+
+### Risk Metrics Calculator
+
+Comprehensive risk analysis: VaR, CVaR, drawdown, tail risk.
+
+```cpp
+#include "risk_metrics.h"
+
+std::vector<double> daily_returns = {...};
+auto report = RiskMetricsCalculator::Calculate(returns, 0.02);  // 2% risk-free rate
+report.Print();
+
+// Key metrics:
+// report.var_95, report.var_99         - Value at Risk
+// report.cvar_95, report.cvar_99       - Expected Shortfall (CVaR)
+// report.max_drawdown                  - Maximum drawdown
+// report.sharpe_ratio, report.sortino_ratio
+// report.skewness, report.kurtosis     - Tail risk indicators
+
+// Individual VaR methods
+double hist_var = RiskMetricsCalculator::HistoricalVaR(returns, 0.95);
+double param_var = RiskMetricsCalculator::ParametricVaR(returns, 0.95);
+double es = RiskMetricsCalculator::ExpectedShortfall(returns, 0.95);
+```
+
+**Key Files:**
+- `include/portfolio_backtester.h` - Multi-symbol backtesting
+- `include/correlation_analyzer.h` - Correlation and diversification
+- `include/risk_metrics.h` - VaR, CVaR, drawdown, ratios
+- `validation/test_portfolio_risk.cpp` - Usage examples
+
 ---
 
 ## 10. Quick Reference

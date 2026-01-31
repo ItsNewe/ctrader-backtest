@@ -2482,3 +2482,13 @@ target_compile_options(test_live_bridge PRIVATE -O3)
 target_link_libraries(test_live_bridge PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
 set_target_properties(test_live_bridge PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
 message(STATUS "Live trading bridge test configured: test_live_bridge")
+
+# Portfolio & Risk Analysis test
+add_executable(test_portfolio_risk test_portfolio_risk.cpp)
+target_include_directories(test_portfolio_risk PRIVATE ../include)
+target_compile_features(test_portfolio_risk PRIVATE cxx_std_17)
+target_compile_options(test_portfolio_risk PRIVATE -O3)
+target_link_libraries(test_portfolio_risk PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_portfolio_risk PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Portfolio & risk analysis test configured: test_portfolio_risk")
+
