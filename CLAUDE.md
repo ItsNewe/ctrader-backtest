@@ -440,6 +440,85 @@ public:
 REGISTER_STRATEGY(MyStrategy);
 ```
 
+### Live Trading Bridge
+
+Run the **exact same strategy code** in backtest and live trading.
+
+```cpp
+#include "live_trading_bridge.h"
+
+// Strategy uses IMarketInterface - works with both:
+class GridStrategy {
+public:
+    void OnTick(const Tick& tick, IMarketInterface& market) {
+        if (should_buy(tick)) {
+            OrderRequest order;
+            order.symbol = "XAUUSD";
+            order.type = OrderType::MARKET_BUY;
+            order.lots = 0.01;
+            order.take_profit = tick.ask + 2.0;
+
+            auto result = market.SendOrder(order);
+        }
+    }
+};
+
+// BACKTEST mode:
+BacktestMarket::Config cfg;
+cfg.initial_balance = 10000.0;
+cfg.contract_size = 100.0;
+cfg.leverage = 500.0;
+BacktestMarket market(cfg);
+market.SetTicks(ticks);
+
+while (market.HasMoreTicks()) {
+    market.NextTick();
+    strategy.OnTick(market.GetCurrentTick("XAUUSD"), market);
+}
+
+// LIVE mode (same strategy code!):
+// MT5Market market("localhost:5555");  // Python bridge
+// strategy.OnTick(tick, market);
+```
+
+**TradingSession Safety Wrapper:**
+
+```cpp
+TradingSession::Config session_cfg;
+session_cfg.max_positions = 10;
+session_cfg.max_lots_per_symbol = 1.0;
+session_cfg.max_drawdown_pct = 25.0;
+session_cfg.max_consecutive_errors = 5;
+
+auto market_ptr = std::make_shared<BacktestMarket>(market);
+TradingSession session(market_ptr, session_cfg);
+session.Start();
+
+// Orders rejected if limits exceeded
+auto result = session.SendOrder(order);
+if (!result.success) {
+    // "Max positions reached" or "Max lots exceeded"
+}
+
+// Emergency stop
+session.GetKillSwitch().Trigger("Manual stop");
+```
+
+**Python MT5 Bridge (`bridge/mt5_bridge.py`):**
+
+```bash
+# Start bridge server
+python bridge/mt5_bridge.py --port 5555
+
+# Commands: connect, get_tick, get_account, get_positions,
+#           send_order, close_position, modify_position, close_all
+```
+
+**Key Files:**
+- `include/live_trading_bridge.h` - IMarketInterface, BacktestMarket, TradingSession
+- `bridge/mt5_bridge.py` - ZMQ bridge to MT5 terminal
+- `validation/test_live_bridge.cpp` - Usage examples
+
 ### Incremental Results Writer
 
 Crash-safe parameter sweeps with resume capability.

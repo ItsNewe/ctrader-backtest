@@ -2473,3 +2473,12 @@ target_compile_options(test_monte_carlo PRIVATE -O3)
 target_link_libraries(test_monte_carlo PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
 set_target_properties(test_monte_carlo PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
 message(STATUS "Monte Carlo simulation test configured: test_monte_carlo")
+
+# Live Trading Bridge test
+add_executable(test_live_bridge test_live_bridge.cpp)
+target_include_directories(test_live_bridge PRIVATE ../include)
+target_compile_features(test_live_bridge PRIVATE cxx_std_17)
+target_compile_options(test_live_bridge PRIVATE -O3)
+target_link_libraries(test_live_bridge PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_live_bridge PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Live trading bridge test configured: test_live_bridge")
