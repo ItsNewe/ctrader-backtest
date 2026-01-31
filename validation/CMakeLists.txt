@@ -2492,3 +2492,13 @@ target_link_libraries(test_portfolio_risk PRIVATE -static-libgcc -static-libstdc
 set_target_properties(test_portfolio_risk PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
 message(STATUS "Portfolio & risk analysis test configured: test_portfolio_risk")
 
+
+# Optimization Engine test
+add_executable(test_optimization test_optimization.cpp)
+target_include_directories(test_optimization PRIVATE ../include)
+target_compile_features(test_optimization PRIVATE cxx_std_17)
+target_compile_options(test_optimization PRIVATE -O3)
+target_link_libraries(test_optimization PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+set_target_properties(test_optimization PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Optimization engine test configured: test_optimization")
+

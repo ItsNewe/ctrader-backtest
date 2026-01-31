@@ -630,6 +630,66 @@ double es = RiskMetricsCalculator::ExpectedShortfall(returns, 0.95);
 - `include/risk_metrics.h` - VaR, CVaR, drawdown, ratios
 - `validation/test_portfolio_risk.cpp` - Usage examples
 
+### Optimization Engine
+
+Parameter optimization with Grid Search, Genetic Algorithm, and Differential Evolution.
+
+```cpp
+#include "optimization_engine.h"
+
+// Define parameters to optimize
+std::vector<OptimizationParam> params = {
+    {"survive_pct", 8.0, 18.0, 2.0},   // min, max, step (grid)
+    {"spacing", 0.5, 3.0, 0.5},
+    {"lookback", 1.0, 8.0, 1.0, true}  // true = integer
+};
+
+// Fitness function - runs your strategy and returns metrics
+auto fitness = [](const std::map<std::string, double>& p) -> OptimizationResult {
+    OptimizationResult r;
+    r.params = p;
+    auto backtest = RunBacktest(p["survive_pct"], p["spacing"], p["lookback"]);
+    r.profit = backtest.profit;
+    r.max_drawdown = backtest.max_dd;
+    r.sharpe_ratio = backtest.sharpe;
+    r.total_trades = backtest.trades;
+    r.fitness = FitnessFunctions::CalmarFitness(r.profit, r.max_drawdown,
+                                                 r.sharpe_ratio, r.total_trades);
+    r.is_valid = true;
+    return r;
+};
+
+// Grid Search (exhaustive)
+OptimizationConfig config;
+config.num_threads = 16;
+GridSearchOptimizer grid(params, fitness, config);
+auto results = grid.Run();  // Returns sorted by fitness
+
+// Genetic Algorithm (continuous params)
+config.ga_population_size = 50;
+config.ga_generations = 100;
+GeneticOptimizer ga(params, fitness, config);
+auto best = ga.Run();
+
+// Differential Evolution (more robust)
+DifferentialEvolutionOptimizer de(params, fitness, config);
+auto best = de.Run();
+```
+
+**Fitness Functions:**
+```cpp
+// Built-in fitness functions
+FitnessFunctions::ProfitFitness(profit, dd, sharpe, trades);   // Maximize profit
+FitnessFunctions::SharpeFitness(profit, dd, sharpe, trades);   // Risk-adjusted
+FitnessFunctions::CalmarFitness(profit, dd, sharpe, trades);   // Return/DD ratio
+FitnessFunctions::CombinedFitness(profit, dd, sharpe, trades,
+    0.4, 0.3, 0.3);  // Weighted: profit, sharpe, low-DD
+```
+
+**Key Files:**
+- `include/optimization_engine.h` - All optimizers and fitness functions
+- `validation/test_optimization.cpp` - Usage examples
+
 ---
 
 ## 10. Quick Reference
