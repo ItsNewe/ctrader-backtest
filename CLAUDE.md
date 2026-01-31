@@ -19,7 +19,8 @@ Precise and correct. Evidence-based. Assumptions stated.
 6. [Validated Dead Ends](#6-validated-dead-ends)
 7. [MT5 Reference](#7-mt5-reference)
 8. [Test Files](#8-test-files)
-9. [Quick Reference](#9-quick-reference)
+9. [Advanced Features](#9-advanced-features)
+10. [Quick Reference](#10-quick-reference)
 
 **Archives** (detailed investigation logs):
 - `.claude/memory/ARCHIVE_INVESTIGATIONS.md` - Research findings
@@ -319,7 +320,152 @@ LoadTickDataOnce(path);  // ~60s for 52M ticks
 
 ---
 
-## 9. Quick Reference
+## 9. Advanced Features
+
+### Walk-Forward Optimization
+
+Prevents overfitting by testing on out-of-sample data windows.
+
+```cpp
+#include "walk_forward.h"
+
+WalkForwardConfig wf_config;
+wf_config.total_start = "2024.01.01";
+wf_config.total_end = "2025.12.31";
+wf_config.is_window_days = 90;      // In-sample: optimize
+wf_config.oos_window_days = 30;     // Out-of-sample: validate
+wf_config.step_days = 30;           // Roll forward monthly
+wf_config.num_threads = 16;
+
+// Define parameter ranges to optimize
+std::vector<ParamRange> ranges = {
+    {"survive_pct", 10.0, 15.0, 1.0},
+    {"base_spacing", 1.0, 2.0, 0.25}
+};
+
+WalkForwardOptimizer<FillUpOscillation> optimizer(wf_config, ranges);
+auto result = optimizer.Run(ticks, backtest_config);
+
+// result.robustness_score: 0-100 (>70 = robust)
+// result.oos_total_profit: realistic expectation
+// result.degradation_pct: IS vs OOS gap
+```
+
+**Interpretation:**
+- Robustness >70: Strategy generalizes well
+- Degradation <30%: Minimal overfitting
+- OOS profit: Use this for realistic expectations
+
+### Monte Carlo Simulation
+
+Assesses strategy robustness through randomization.
+
+```cpp
+#include "monte_carlo.h"
+
+MonteCarloConfig mc_config;
+mc_config.num_simulations = 1000;
+mc_config.mode = MonteCarloMode::COMBINED;
+mc_config.enable_shuffle = true;
+mc_config.enable_slippage = true;
+mc_config.slippage_stddev_points = 0.3;
+
+MonteCarloSimulator sim(mc_config);
+auto result = sim.Run(trades, initial_balance, true);
+
+// Key outputs:
+// result.profit_5th_percentile  - Worst-case (use for sizing)
+// result.probability_of_loss    - Risk metric
+// result.confidence_level       - HIGH/MEDIUM/LOW
+```
+
+**Modes:**
+| Mode | Purpose |
+|------|---------|
+| SHUFFLE_TRADES | Test sequence dependence |
+| SKIP_TRADES | Simulate missed entries (10%) |
+| VARY_SLIPPAGE | Execution quality sensitivity |
+| BOOTSTRAP | Statistical significance |
+| COMBINED | Worst realistic scenario |
+
+### Report Generation
+
+Generate professional HTML/CSV/JSON reports.
+
+```cpp
+#include "report_generator.h"
+
+ReportConfig report_cfg;
+report_cfg.title = "FillUpOscillation Backtest";
+report_cfg.output_dir = "./reports";
+report_cfg.formats = {ReportFormat::HTML, ReportFormat::CSV};
+report_cfg.include_trades = true;
+report_cfg.include_equity_curve = true;
+
+ReportGenerator generator(report_cfg);
+generator.Generate(backtest_results, trades, equity_curve);
+// Creates: reports/report.html, reports/trades.csv
+```
+
+**HTML Report Includes:**
+- Interactive equity curve (Chart.js)
+- Monthly breakdown table
+- Key metrics summary
+- Trade list (sortable)
+- Monte Carlo results (if provided)
+
+### Strategy Interface
+
+Clean API for implementing new strategies.
+
+```cpp
+#include "strategy_interface.h"
+
+class MyStrategy : public IStrategy {
+public:
+    void OnInit(StrategyContext& ctx) override {
+        // Initialize state
+    }
+
+    void OnTick(const Tick& tick, StrategyContext& ctx) override {
+        if (should_buy(tick)) {
+            ctx.Buy(0.01, tick.ask, tick.ask + 2.0);
+        }
+    }
+
+    std::string GetName() const override { return "MyStrategy"; }
+};
+
+// Register for factory loading
+REGISTER_STRATEGY(MyStrategy);
+```
+
+### Incremental Results Writer
+
+Crash-safe parameter sweeps with resume capability.
+
+```cpp
+#include "sweep_results_writer.h"
+
+SweepResultsWriter writer("sweep_results.csv");
+writer.WriteHeader({"survive", "spacing", "profit", "dd"});
+
+for (auto& config : configs) {
+    auto result = run_backtest(config);
+    writer.WriteRow({config.survive, config.spacing,
+                     result.profit, result.max_dd});
+    // Results written immediately - safe to interrupt
+}
+
+// Resume after crash:
+SweepCheckpoint checkpoint("sweep_results.csv");
+size_t completed = checkpoint.GetCompletedCount();
+// Skip first 'completed' configs
+```
+
+---
+
+## 10. Quick Reference
 
 ### XAUUSD Parameters
 
