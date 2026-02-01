@@ -82,18 +82,25 @@ struct BacktestProgress {
 
 struct SingleBacktestResult {
     QMap<QString, double> parameters;
-    double finalBalance;
-    double netProfit;
-    double profitFactor;
-    double maxDrawdown;
-    double maxDrawdownPct;
-    double sharpeRatio;
-    double sortinoRatio;
-    double calmarRatio;
-    int totalTrades;
-    double winRate;
-    double customScore;
-    bool valid;
+    double finalBalance = 0.0;
+    double netProfit = 0.0;
+    double grossProfit = 0.0;   // Sum of winning trades
+    double grossLoss = 0.0;     // Sum of losing trades
+    double profitFactor = 0.0;
+    double recoveryFactor = 0.0; // Net profit / Max drawdown
+    double maxDrawdown = 0.0;
+    double maxDrawdownPct = 0.0;
+    double sharpeRatio = 0.0;
+    double sortinoRatio = 0.0;
+    double calmarRatio = 0.0;
+    int totalTrades = 0;
+    int winningTrades = 0;
+    int losingTrades = 0;
+    double winRate = 0.0;
+    double averageWin = 0.0;
+    double averageLoss = 0.0;
+    double customScore = 0.0;
+    bool valid = false;
 };
 
 class BacktestWorker : public QObject

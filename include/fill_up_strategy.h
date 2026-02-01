@@ -169,7 +169,7 @@ private:
         const auto& positions = engine.GetOpenPositions();
 
         for (const Trade* trade : positions) {
-            if (trade->direction == "BUY") {
+            if (trade->IsBuy()) {
                 double open_price = trade->entry_price;
                 double lots = trade->lot_size;
 
@@ -319,7 +319,7 @@ private:
 
         for (const Trade* trade : positions) {
             // Use current bid for BUY positions (current market price for margin)
-            double price = (trade->direction == "BUY") ? current_bid_ : current_ask_;
+            double price = (trade->IsBuy()) ? current_bid_ : current_ask_;
             used_margin += CalculateMarginForTrade(trade->lot_size, price);
         }
 

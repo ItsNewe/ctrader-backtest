@@ -12,6 +12,10 @@ namespace backtest {
 /**
  * WU WEI (无为) GRID STRATEGY
  *
+ * @deprecated This strategy is EXPERIMENTAL and NOT TESTED. Use FillUpOscillation
+ * or StrategyCombinedJu for production backtesting. The Wu Wei concept is
+ * interesting but hasn't been validated against real tick data.
+ *
  * Jū principle: Effortless action - only act when the path is clear.
  * "Be like water" - flow where there is no resistance.
  *
@@ -292,7 +296,7 @@ private:
         volume_of_open_trades_ = 0.0;
 
         for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
+            if (trade->IsBuy()) {  // Use IsBuy() instead of string comparison
                 volume_of_open_trades_ += trade->lot_size;
                 lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
                 highest_buy_ = std::max(highest_buy_, trade->entry_price);

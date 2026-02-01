@@ -66,7 +66,7 @@ void print_usage() {
 
 struct Config {
     std::string symbol = "XAUUSD";
-    std::string start_date = "2025.01.01";
+    std::string start_date = "2024.12.31";  // Note: tick data starts 2024.12.31
     std::string end_date = "2025.01.31";
     double initial_balance = 10000.0;
     std::string strategy = "fillup";
@@ -160,6 +160,10 @@ int main(int argc, char* argv[]) {
     bt_config.tick_data_config = tick_config;
     bt_config.verbose = cfg.verbose;
 
+    // Enable equity curve tracking for metrics
+    bt_config.track_equity_curve = true;
+    bt_config.equity_sample_interval = 1000;  // Sample every 1000 ticks
+
     try {
         TickBasedEngine engine(bt_config);
 
@@ -233,8 +237,11 @@ int main(int argc, char* argv[]) {
             : 0.0;
         json.key("profit_factor"); json.value(profit_factor);
 
-        // Sharpe ratio placeholder (would need daily returns to calculate properly)
-        json.key("sharpe_ratio"); json.value(0.0);
+        // Risk metrics from engine (actual calculated values)
+        json.key("sharpe_ratio"); json.value(results.sharpe_ratio);
+        json.key("sortino_ratio"); json.value(results.sortino_ratio);
+        json.key("profit_factor_calc"); json.value(results.profit_factor);
+        json.key("recovery_factor"); json.value(results.recovery_factor);
 
         json.key("total_swap"); json.value(results.total_swap_charged);
 
@@ -243,20 +250,33 @@ int main(int argc, char* argv[]) {
         json.key("largest_win"); json.value(results.largest_win);
         json.key("largest_loss"); json.value(results.largest_loss);
 
-        // Equity curve placeholder (engine doesn't track this currently)
+        // Equity curve from engine (actual tracked values)
         json.key("equity_curve");
         json.begin_array();
         json.first = true;  // Reset for array elements
-        json.value(cfg.initial_balance);
-        json.ss << ",";
-        json.value(results.final_balance);
+        for (size_t i = 0; i < results.equity_curve.size(); ++i) {
+            if (i > 0) json.ss << ",";
+            json.value(results.equity_curve[i]);
+        }
+        // If no equity curve, at least provide start/end
+        if (results.equity_curve.empty()) {
+            json.value(cfg.initial_balance);
+            json.ss << ",";
+            json.value(results.final_balance);
+        }
         json.end_array();
         json.first = false;  // Reset for next key
 
-        // Trade list placeholder
-        json.key("trades");
+        // Equity timestamps
+        json.key("equity_timestamps");
         json.begin_array();
+        json.first = true;
+        for (size_t i = 0; i < results.equity_timestamps.size(); ++i) {
+            if (i > 0) json.ss << ",";
+            json.value(results.equity_timestamps[i]);
+        }
         json.end_array();
+        json.first = false;
 
         json.end_object();
 
