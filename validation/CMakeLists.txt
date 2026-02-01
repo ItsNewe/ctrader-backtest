@@ -12,7 +12,7 @@ macro(add_test_if_exists target_name source_file)
         if(MSVC)
             target_compile_options(${target_name} PRIVATE /W4 /O2)
         else()
-            target_compile_options(${target_name} PRIVATE -Wall -Wextra -O3 -mavx2 -mfma)
+            target_compile_options(${target_name} PRIVATE -Wall -Wextra -O3 -mavx512f -mavx512dq -mavx2 -mfma)
         endif()
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation"
@@ -182,9 +182,9 @@ target_include_directories(test_fill_up PRIVATE
 target_compile_features(test_fill_up PRIVATE cxx_std_17)
 
 if(MSVC)
-    target_compile_options(test_fill_up PRIVATE /W4 /O2 /arch:AVX2)
+    target_compile_options(test_fill_up PRIVATE /W4 /O2 /arch:AVX512)
 else()
-    target_compile_options(test_fill_up PRIVATE -Wall -Wextra -O3 -mavx2 -mfma)
+    target_compile_options(test_fill_up PRIVATE -Wall -Wextra -O3 -mavx512f -mavx512dq -mavx2 -mfma)
 endif()
 
 set_target_properties(test_fill_up PROPERTIES
@@ -3465,6 +3465,23 @@ target_link_libraries(test_grid_debug PRIVATE -static-libgcc -static-libstdc++ -
 set_target_properties(test_grid_debug PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
 
 endif()
+# test_grid_multi_optimized - SIMD + std::thread parallel optimized version
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_grid_multi_optimized.cpp")
+add_executable(test_grid_multi_optimized
+    test_grid_multi_optimized.cpp)
+target_include_directories(test_grid_multi_optimized PRIVATE ../include)
+target_compile_features(test_grid_multi_optimized PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(test_grid_multi_optimized PRIVATE /W4 /O2 /arch:AVX512)
+else()
+    # AVX-512 SIMD + std::thread parallelism
+    target_compile_options(test_grid_multi_optimized PRIVATE -Wall -Wextra -O3 -mavx512f -mavx512dq -mavx2 -pthread)
+    target_link_libraries(test_grid_multi_optimized PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+endif()
+set_target_properties(test_grid_multi_optimized PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "Multi-instrument grid optimized test configured: test_grid_multi_optimized (AVX-512 + threads)")
+endif()
+
 # test_grid_full_period - SKIPPED (source file not found)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_grid_full_period.cpp")
 add_executable(test_grid_full_period

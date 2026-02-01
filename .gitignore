@@ -64,3 +64,14 @@ validation/**/*_TICKS_*.csv
 validation/*_log*.txt
 validation/**/*_output*.txt
 validation/**/*.log
+
+# Ignore temporary Claude directories
+tmpclaude-*
+validation/tmpclaude-*
+nul
+
+# Ignore temporary output files
+*.txt
+!README.txt
+!BUILDING_BLOCKS.md
+!*.md
