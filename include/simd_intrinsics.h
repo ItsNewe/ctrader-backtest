@@ -17,6 +17,8 @@
 #define SIMD_INTRINSICS_H
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -118,19 +120,39 @@ inline double sum_sse2(const double* data, size_t n) {
     return result;
 }
 
-// AVX2 version - sum 4 doubles at once
+// AVX2 version - sum 4 doubles at once (2x unrolled with prefetch)
 inline double sum_avx2(const double* data, size_t n) {
-    __m256d sum = _mm256_setzero_pd();
+    __m256d sum0 = _mm256_setzero_pd();
+    __m256d sum1 = _mm256_setzero_pd();
     size_t i = 0;
 
-    for (; i + 4 <= n; i += 4) {
-        __m256d v = _mm256_loadu_pd(data + i);
-        sum = _mm256_add_pd(sum, v);
+    // Prefetch first cache line
+    _mm_prefetch(reinterpret_cast<const char*>(data), _MM_HINT_T0);
+
+    // 2x unrolled loop - process 8 doubles per iteration
+    for (; i + 8 <= n; i += 8) {
+        // Prefetch ahead (64 bytes = 8 doubles ahead)
+        _mm_prefetch(reinterpret_cast<const char*>(data + i + 16), _MM_HINT_T0);
+
+        __m256d v0 = _mm256_loadu_pd(data + i);
+        __m256d v1 = _mm256_loadu_pd(data + i + 4);
+        sum0 = _mm256_add_pd(sum0, v0);
+        sum1 = _mm256_add_pd(sum1, v1);
     }
 
+    // Handle 4-element chunk if remaining
+    if (i + 4 <= n) {
+        __m256d v = _mm256_loadu_pd(data + i);
+        sum0 = _mm256_add_pd(sum0, v);
+        i += 4;
+    }
+
+    // Combine accumulators
+    sum0 = _mm256_add_pd(sum0, sum1);
+
     // Horizontal sum (256-bit to 128-bit)
-    __m128d lo = _mm256_castpd256_pd128(sum);
-    __m128d hi = _mm256_extractf128_pd(sum, 1);
+    __m128d lo = _mm256_castpd256_pd128(sum0);
+    __m128d hi = _mm256_extractf128_pd(sum0, 1);
     lo = _mm_add_pd(lo, hi);
 
     __m128d shuf = _mm_shuffle_pd(lo, lo, 1);
@@ -148,17 +170,34 @@ inline double sum_avx2(const double* data, size_t n) {
 }
 
 #ifdef __AVX512F__
-// AVX-512 version - sum 8 doubles at once
+// AVX-512 version - sum 8 doubles at once (2x unrolled with prefetch)
 inline double sum_avx512(const double* data, size_t n) {
-    __m512d sum = _mm512_setzero_pd();
+    __m512d sum0 = _mm512_setzero_pd();
+    __m512d sum1 = _mm512_setzero_pd();
     size_t i = 0;
 
-    for (; i + 8 <= n; i += 8) {
-        __m512d v = _mm512_loadu_pd(data + i);
-        sum = _mm512_add_pd(sum, v);
+    _mm_prefetch(reinterpret_cast<const char*>(data), _MM_HINT_T0);
+
+    // 2x unrolled - process 16 doubles per iteration
+    for (; i + 16 <= n; i += 16) {
+        _mm_prefetch(reinterpret_cast<const char*>(data + i + 32), _MM_HINT_T0);
+
+        __m512d v0 = _mm512_loadu_pd(data + i);
+        __m512d v1 = _mm512_loadu_pd(data + i + 8);
+        sum0 = _mm512_add_pd(sum0, v0);
+        sum1 = _mm512_add_pd(sum1, v1);
     }
 
-    double result = _mm512_reduce_add_pd(sum);
+    // Handle 8-element chunk
+    if (i + 8 <= n) {
+        __m512d v = _mm512_loadu_pd(data + i);
+        sum0 = _mm512_add_pd(sum0, v);
+        i += 8;
+    }
+
+    // Combine and reduce
+    sum0 = _mm512_add_pd(sum0, sum1);
+    double result = _mm512_reduce_add_pd(sum0);
 
     // Handle remainder
     for (; i < n; ++i) {
@@ -166,6 +205,120 @@ inline double sum_avx512(const double* data, size_t n) {
     }
 
     return result;
+}
+
+// AVX-512 max
+inline double max_avx512(const double* data, size_t n) {
+    if (n == 0) return 0.0;
+
+    __m512d max_vec = _mm512_set1_pd(-1e308);
+    size_t i = 0;
+
+    // 2x unrolled
+    for (; i + 16 <= n; i += 16) {
+        __m512d v0 = _mm512_loadu_pd(data + i);
+        __m512d v1 = _mm512_loadu_pd(data + i + 8);
+        max_vec = _mm512_max_pd(max_vec, v0);
+        max_vec = _mm512_max_pd(max_vec, v1);
+    }
+
+    for (; i + 8 <= n; i += 8) {
+        __m512d v = _mm512_loadu_pd(data + i);
+        max_vec = _mm512_max_pd(max_vec, v);
+    }
+
+    double result = _mm512_reduce_max_pd(max_vec);
+
+    for (; i < n; ++i) {
+        if (data[i] > result) result = data[i];
+    }
+
+    return result;
+}
+
+// AVX-512 min
+inline double min_avx512(const double* data, size_t n) {
+    if (n == 0) return 0.0;
+
+    __m512d min_vec = _mm512_set1_pd(1e308);
+    size_t i = 0;
+
+    for (; i + 16 <= n; i += 16) {
+        __m512d v0 = _mm512_loadu_pd(data + i);
+        __m512d v1 = _mm512_loadu_pd(data + i + 8);
+        min_vec = _mm512_min_pd(min_vec, v0);
+        min_vec = _mm512_min_pd(min_vec, v1);
+    }
+
+    for (; i + 8 <= n; i += 8) {
+        __m512d v = _mm512_loadu_pd(data + i);
+        min_vec = _mm512_min_pd(min_vec, v);
+    }
+
+    double result = _mm512_reduce_min_pd(min_vec);
+
+    for (; i < n; ++i) {
+        if (data[i] < result) result = data[i];
+    }
+
+    return result;
+}
+
+// AVX-512 P/L batch calculation
+inline void calculate_pnl_batch_avx512(
+    const double* entry_prices, const double* lot_sizes,
+    double current_price, double contract_size,
+    double* pnl_output, size_t n, bool is_buy) {
+
+    __m512d price_vec = _mm512_set1_pd(current_price);
+    __m512d contract_vec = _mm512_set1_pd(contract_size);
+
+    _mm_prefetch(reinterpret_cast<const char*>(entry_prices), _MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(lot_sizes), _MM_HINT_T0);
+
+    size_t i = 0;
+
+    // Process 16 positions per iteration
+    for (; i + 16 <= n; i += 16) {
+        _mm_prefetch(reinterpret_cast<const char*>(entry_prices + i + 32), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(lot_sizes + i + 32), _MM_HINT_T0);
+
+        __m512d entry0 = _mm512_loadu_pd(entry_prices + i);
+        __m512d entry1 = _mm512_loadu_pd(entry_prices + i + 8);
+        __m512d lots0 = _mm512_loadu_pd(lot_sizes + i);
+        __m512d lots1 = _mm512_loadu_pd(lot_sizes + i + 8);
+
+        __m512d diff0, diff1;
+        if (is_buy) {
+            diff0 = _mm512_sub_pd(price_vec, entry0);
+            diff1 = _mm512_sub_pd(price_vec, entry1);
+        } else {
+            diff0 = _mm512_sub_pd(entry0, price_vec);
+            diff1 = _mm512_sub_pd(entry1, price_vec);
+        }
+
+        __m512d pnl0 = _mm512_mul_pd(_mm512_mul_pd(diff0, lots0), contract_vec);
+        __m512d pnl1 = _mm512_mul_pd(_mm512_mul_pd(diff1, lots1), contract_vec);
+
+        _mm512_storeu_pd(pnl_output + i, pnl0);
+        _mm512_storeu_pd(pnl_output + i + 8, pnl1);
+    }
+
+    // Handle remaining with 8-element chunks
+    for (; i + 8 <= n; i += 8) {
+        __m512d entry = _mm512_loadu_pd(entry_prices + i);
+        __m512d lots = _mm512_loadu_pd(lot_sizes + i);
+
+        __m512d diff = is_buy ? _mm512_sub_pd(price_vec, entry) : _mm512_sub_pd(entry, price_vec);
+        __m512d pnl = _mm512_mul_pd(_mm512_mul_pd(diff, lots), contract_vec);
+        _mm512_storeu_pd(pnl_output + i, pnl);
+    }
+
+    // Scalar remainder
+    for (; i < n; ++i) {
+        double diff = is_buy ? (current_price - entry_prices[i]) : (entry_prices[i] - current_price);
+        pnl_output[i] = diff * lot_sizes[i] * contract_size;
+    }
 }
 #endif
 
@@ -293,19 +446,51 @@ inline void ema_vectorized(const double* input, double* output, size_t n, int pe
 // RSI (Relative Strength Index)
 //=============================================================================
 
+// Vectorized calculation of price changes, gains, and losses
+inline void calculate_changes_gains_losses_avx2(
+    const double* input, double* changes, double* gains, double* losses, size_t n) {
+
+    __m256d zero = _mm256_setzero_pd();
+
+    size_t i = 1;
+    // Process 4 changes at a time
+    for (; i + 4 <= n; i += 4) {
+        __m256d curr = _mm256_loadu_pd(input + i);
+        __m256d prev = _mm256_loadu_pd(input + i - 1);
+
+        __m256d change = _mm256_sub_pd(curr, prev);
+        _mm256_storeu_pd(changes + i, change);
+
+        // gains = max(change, 0)
+        __m256d gain = _mm256_max_pd(change, zero);
+        _mm256_storeu_pd(gains + i, gain);
+
+        // losses = max(-change, 0) = -min(change, 0)
+        __m256d loss = _mm256_sub_pd(zero, _mm256_min_pd(change, zero));
+        _mm256_storeu_pd(losses + i, loss);
+    }
+
+    // Handle remainder
+    for (; i < n; ++i) {
+        double change = input[i] - input[i-1];
+        changes[i] = change;
+        gains[i] = change > 0 ? change : 0;
+        losses[i] = change < 0 ? -change : 0;
+    }
+}
+
 inline void rsi_avx2(const double* input, double* output, size_t n, int period) {
     if (n < static_cast<size_t>(period) + 1) return;
 
-    // Initialize with scalar for first period
-    double avg_gain = 0, avg_loss = 0;
+    // Allocate temporary arrays for vectorized gain/loss calculation
+    std::vector<double> changes(n), gains(n), losses(n);
 
-    for (int i = 1; i <= period; ++i) {
-        double change = input[i] - input[i-1];
-        if (change > 0) avg_gain += change;
-        else avg_loss -= change;
-    }
-    avg_gain /= period;
-    avg_loss /= period;
+    // Vectorized calculation of all changes, gains, losses
+    calculate_changes_gains_losses_avx2(input, changes.data(), gains.data(), losses.data(), n);
+
+    // Sum initial gains/losses using vectorized sum
+    double avg_gain = sum_avx2(gains.data() + 1, period) / period;
+    double avg_loss = sum_avx2(losses.data() + 1, period) / period;
 
     // First RSI value
     if (avg_loss == 0) output[period] = 100.0;
@@ -314,16 +499,14 @@ inline void rsi_avx2(const double* input, double* output, size_t n, int period) 
         output[period] = 100.0 - 100.0 / (1.0 + rs);
     }
 
-    // Subsequent values with Wilder smoothing
+    // Subsequent values with Wilder smoothing (sequential due to dependency)
     double period_minus_1 = period - 1;
+    double inv_period = 1.0 / period;
 
     for (size_t i = period + 1; i < n; ++i) {
-        double change = input[i] - input[i-1];
-        double gain = change > 0 ? change : 0;
-        double loss = change < 0 ? -change : 0;
-
-        avg_gain = (avg_gain * period_minus_1 + gain) / period;
-        avg_loss = (avg_loss * period_minus_1 + loss) / period;
+        // Use FMA for smoothing calculation
+        avg_gain = std::fma(avg_gain, period_minus_1 * inv_period, gains[i] * inv_period);
+        avg_loss = std::fma(avg_loss, period_minus_1 * inv_period, losses[i] * inv_period);
 
         if (avg_loss == 0) output[i] = 100.0;
         else {
@@ -334,7 +517,35 @@ inline void rsi_avx2(const double* input, double* output, size_t n, int period) 
 }
 
 inline void rsi_vectorized(const double* input, double* output, size_t n, int period) {
-    rsi_avx2(input, output, n, period);
+    if (g_cpu_features.avx2) {
+        rsi_avx2(input, output, n, period);
+    } else {
+        // Scalar fallback
+        if (n < static_cast<size_t>(period) + 1) return;
+
+        double avg_gain = 0, avg_loss = 0;
+        for (int i = 1; i <= period; ++i) {
+            double change = input[i] - input[i-1];
+            if (change > 0) avg_gain += change;
+            else avg_loss -= change;
+        }
+        avg_gain /= period;
+        avg_loss /= period;
+
+        if (avg_loss == 0) output[period] = 100.0;
+        else output[period] = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss);
+
+        double period_minus_1 = period - 1;
+        for (size_t i = period + 1; i < n; ++i) {
+            double change = input[i] - input[i-1];
+            double gain = change > 0 ? change : 0;
+            double loss = change < 0 ? -change : 0;
+            avg_gain = (avg_gain * period_minus_1 + gain) / period;
+            avg_loss = (avg_loss * period_minus_1 + loss) / period;
+            if (avg_loss == 0) output[i] = 100.0;
+            else output[i] = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss);
+        }
+    }
 }
 
 //=============================================================================
@@ -530,8 +741,44 @@ inline void calculate_pnl_batch_avx2(
     __m256d price_vec = _mm256_set1_pd(current_price);
     __m256d contract_vec = _mm256_set1_pd(contract_size);
 
+    // Prefetch first cache lines
+    _mm_prefetch(reinterpret_cast<const char*>(entry_prices), _MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(lot_sizes), _MM_HINT_T0);
+
     size_t i = 0;
-    for (; i + 4 <= n; i += 4) {
+
+    // 2x unrolled loop - process 8 positions per iteration
+    for (; i + 8 <= n; i += 8) {
+        // Prefetch ahead
+        _mm_prefetch(reinterpret_cast<const char*>(entry_prices + i + 16), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(lot_sizes + i + 16), _MM_HINT_T0);
+
+        __m256d entry0 = _mm256_loadu_pd(entry_prices + i);
+        __m256d entry1 = _mm256_loadu_pd(entry_prices + i + 4);
+        __m256d lots0 = _mm256_loadu_pd(lot_sizes + i);
+        __m256d lots1 = _mm256_loadu_pd(lot_sizes + i + 4);
+
+        __m256d price_diff0, price_diff1;
+        if (is_buy) {
+            price_diff0 = _mm256_sub_pd(price_vec, entry0);
+            price_diff1 = _mm256_sub_pd(price_vec, entry1);
+        } else {
+            price_diff0 = _mm256_sub_pd(entry0, price_vec);
+            price_diff1 = _mm256_sub_pd(entry1, price_vec);
+        }
+
+        // PnL = price_diff * lots * contract_size (using FMA for second multiply)
+        __m256d pnl0 = _mm256_mul_pd(price_diff0, lots0);
+        __m256d pnl1 = _mm256_mul_pd(price_diff1, lots1);
+        pnl0 = _mm256_mul_pd(pnl0, contract_vec);
+        pnl1 = _mm256_mul_pd(pnl1, contract_vec);
+
+        _mm256_storeu_pd(pnl_output + i, pnl0);
+        _mm256_storeu_pd(pnl_output + i + 4, pnl1);
+    }
+
+    // Handle remaining 4-element chunk
+    if (i + 4 <= n) {
         __m256d entry = _mm256_loadu_pd(entry_prices + i);
         __m256d lots = _mm256_loadu_pd(lot_sizes + i);
 
@@ -542,11 +789,10 @@ inline void calculate_pnl_batch_avx2(
             price_diff = _mm256_sub_pd(entry, price_vec);
         }
 
-        // PnL = price_diff * lots * contract_size
         __m256d pnl = _mm256_mul_pd(price_diff, lots);
         pnl = _mm256_mul_pd(pnl, contract_vec);
-
         _mm256_storeu_pd(pnl_output + i, pnl);
+        i += 4;
     }
 
     // Handle remainder
@@ -602,6 +848,315 @@ inline double total_margin_batch_avx2(const double* lot_sizes, size_t n,
     // Handle remainder
     for (; i < n; ++i) {
         result += lot_sizes[i] * contract_size * price / leverage;
+    }
+
+    return result;
+}
+
+//=============================================================================
+// Vectorized Min/Max (for drawdown calculations)
+//=============================================================================
+
+// Auto-select best max function
+inline double max_value(const double* data, size_t n);
+
+// Auto-select best min function
+inline double min_value(const double* data, size_t n);
+
+// Auto-select best P/L batch function
+inline void calculate_pnl_batch(
+    const double* entry_prices, const double* lot_sizes,
+    double current_price, double contract_size,
+    double* pnl_output, size_t n, bool is_buy);
+
+// Find maximum value in array
+inline double max_avx2(const double* data, size_t n) {
+    if (n == 0) return 0.0;
+
+    __m256d max_vec = _mm256_set1_pd(-1e308);  // Start with very small number
+    size_t i = 0;
+
+    // 2x unrolled
+    for (; i + 8 <= n; i += 8) {
+        __m256d v0 = _mm256_loadu_pd(data + i);
+        __m256d v1 = _mm256_loadu_pd(data + i + 4);
+        max_vec = _mm256_max_pd(max_vec, v0);
+        max_vec = _mm256_max_pd(max_vec, v1);
+    }
+
+    for (; i + 4 <= n; i += 4) {
+        __m256d v = _mm256_loadu_pd(data + i);
+        max_vec = _mm256_max_pd(max_vec, v);
+    }
+
+    // Horizontal max
+    __m128d lo = _mm256_castpd256_pd128(max_vec);
+    __m128d hi = _mm256_extractf128_pd(max_vec, 1);
+    lo = _mm_max_pd(lo, hi);
+    __m128d shuf = _mm_shuffle_pd(lo, lo, 1);
+    lo = _mm_max_pd(lo, shuf);
+
+    double result;
+    _mm_store_sd(&result, lo);
+
+    // Handle remainder
+    for (; i < n; ++i) {
+        if (data[i] > result) result = data[i];
+    }
+
+    return result;
+}
+
+// Find minimum value in array
+inline double min_avx2(const double* data, size_t n) {
+    if (n == 0) return 0.0;
+
+    __m256d min_vec = _mm256_set1_pd(1e308);  // Start with very large number
+    size_t i = 0;
+
+    // 2x unrolled
+    for (; i + 8 <= n; i += 8) {
+        __m256d v0 = _mm256_loadu_pd(data + i);
+        __m256d v1 = _mm256_loadu_pd(data + i + 4);
+        min_vec = _mm256_min_pd(min_vec, v0);
+        min_vec = _mm256_min_pd(min_vec, v1);
+    }
+
+    for (; i + 4 <= n; i += 4) {
+        __m256d v = _mm256_loadu_pd(data + i);
+        min_vec = _mm256_min_pd(min_vec, v);
+    }
+
+    // Horizontal min
+    __m128d lo = _mm256_castpd256_pd128(min_vec);
+    __m128d hi = _mm256_extractf128_pd(min_vec, 1);
+    lo = _mm_min_pd(lo, hi);
+    __m128d shuf = _mm_shuffle_pd(lo, lo, 1);
+    lo = _mm_min_pd(lo, shuf);
+
+    double result;
+    _mm_store_sd(&result, lo);
+
+    // Handle remainder
+    for (; i < n; ++i) {
+        if (data[i] < result) result = data[i];
+    }
+
+    return result;
+}
+
+// Auto-select implementations
+inline double max_value(const double* data, size_t n) {
+#ifdef __AVX512F__
+    if (g_cpu_features.avx512f) return max_avx512(data, n);
+#endif
+    return max_avx2(data, n);
+}
+
+inline double min_value(const double* data, size_t n) {
+#ifdef __AVX512F__
+    if (g_cpu_features.avx512f) return min_avx512(data, n);
+#endif
+    return min_avx2(data, n);
+}
+
+inline void calculate_pnl_batch(
+    const double* entry_prices, const double* lot_sizes,
+    double current_price, double contract_size,
+    double* pnl_output, size_t n, bool is_buy) {
+#ifdef __AVX512F__
+    if (g_cpu_features.avx512f) {
+        calculate_pnl_batch_avx512(entry_prices, lot_sizes, current_price,
+                                   contract_size, pnl_output, n, is_buy);
+        return;
+    }
+#endif
+    calculate_pnl_batch_avx2(entry_prices, lot_sizes, current_price,
+                             contract_size, pnl_output, n, is_buy);
+}
+
+// Running maximum (peak for drawdown calculation)
+inline void running_max_avx2(const double* input, double* output, size_t n) {
+    if (n == 0) return;
+
+    double current_max = input[0];
+    output[0] = current_max;
+
+    // This is inherently sequential, but we can optimize memory access
+    size_t i = 1;
+    for (; i + 4 <= n; i += 4) {
+        // Prefetch ahead
+        _mm_prefetch(reinterpret_cast<const char*>(input + i + 16), _MM_HINT_T0);
+
+        for (size_t j = 0; j < 4; ++j) {
+            if (input[i + j] > current_max) current_max = input[i + j];
+            output[i + j] = current_max;
+        }
+    }
+
+    for (; i < n; ++i) {
+        if (input[i] > current_max) current_max = input[i];
+        output[i] = current_max;
+    }
+}
+
+// Calculate drawdown series: (peak - value) / peak
+inline void drawdown_avx2(const double* equity, double* drawdown, size_t n) {
+    if (n == 0) return;
+
+    std::vector<double> peaks(n);
+    running_max_avx2(equity, peaks.data(), n);
+
+    __m256d one = _mm256_set1_pd(1.0);
+
+    size_t i = 0;
+    for (; i + 4 <= n; i += 4) {
+        __m256d eq = _mm256_loadu_pd(equity + i);
+        __m256d pk = _mm256_loadu_pd(peaks.data() + i);
+
+        // drawdown = 1 - (equity / peak)
+        __m256d ratio = _mm256_div_pd(eq, pk);
+        __m256d dd = _mm256_sub_pd(one, ratio);
+
+        _mm256_storeu_pd(drawdown + i, dd);
+    }
+
+    for (; i < n; ++i) {
+        drawdown[i] = 1.0 - (equity[i] / peaks[i]);
+    }
+}
+
+// Find maximum drawdown value
+inline double max_drawdown(const double* equity, size_t n) {
+    if (n == 0) return 0.0;
+
+    std::vector<double> dd(n);
+    drawdown_avx2(equity, dd.data(), n);
+    return max_avx2(dd.data(), n);
+}
+
+//=============================================================================
+// Aligned Memory Allocation
+//=============================================================================
+
+// Allocate aligned memory (32-byte for AVX2, 64-byte for AVX-512)
+inline void* aligned_alloc_simd(size_t size, size_t alignment = 32) {
+#if defined(_MSC_VER) || defined(__MINGW32__)
+    return _aligned_malloc(size, alignment);
+#else
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, alignment, size) != 0) return nullptr;
+    return ptr;
+#endif
+}
+
+inline void aligned_free_simd(void* ptr) {
+#if defined(_MSC_VER) || defined(__MINGW32__)
+    _aligned_free(ptr);
+#else
+    free(ptr);
+#endif
+}
+
+// RAII wrapper for aligned memory
+template<typename T>
+class AlignedArray {
+public:
+    explicit AlignedArray(size_t count, size_t alignment = 32)
+        : size_(count)
+        , data_(static_cast<T*>(aligned_alloc_simd(count * sizeof(T), alignment))) {}
+
+    ~AlignedArray() {
+        if (data_) aligned_free_simd(data_);
+    }
+
+    // Non-copyable
+    AlignedArray(const AlignedArray&) = delete;
+    AlignedArray& operator=(const AlignedArray&) = delete;
+
+    // Movable
+    AlignedArray(AlignedArray&& other) noexcept : size_(other.size_), data_(other.data_) {
+        other.data_ = nullptr;
+        other.size_ = 0;
+    }
+
+    AlignedArray& operator=(AlignedArray&& other) noexcept {
+        if (this != &other) {
+            if (data_) aligned_free_simd(data_);
+            data_ = other.data_;
+            size_ = other.size_;
+            other.data_ = nullptr;
+            other.size_ = 0;
+        }
+        return *this;
+    }
+
+    T* data() { return data_; }
+    const T* data() const { return data_; }
+    size_t size() const { return size_; }
+
+    T& operator[](size_t i) { return data_[i]; }
+    const T& operator[](size_t i) const { return data_[i]; }
+
+private:
+    size_t size_;
+    T* data_;
+};
+
+//=============================================================================
+// Batch Operations for Position Management
+//=============================================================================
+
+// Calculate margin for multiple positions at once (2x unrolled)
+inline double total_margin_batch_avx2_optimized(
+    const double* lot_sizes, const double* prices, size_t n,
+    double contract_size, double leverage) {
+
+    __m256d contract_vec = _mm256_set1_pd(contract_size);
+    __m256d leverage_inv = _mm256_set1_pd(1.0 / leverage);
+    __m256d sum0 = _mm256_setzero_pd();
+    __m256d sum1 = _mm256_setzero_pd();
+
+    _mm_prefetch(reinterpret_cast<const char*>(lot_sizes), _MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(prices), _MM_HINT_T0);
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        _mm_prefetch(reinterpret_cast<const char*>(lot_sizes + i + 16), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(prices + i + 16), _MM_HINT_T0);
+
+        __m256d lots0 = _mm256_loadu_pd(lot_sizes + i);
+        __m256d lots1 = _mm256_loadu_pd(lot_sizes + i + 4);
+        __m256d prc0 = _mm256_loadu_pd(prices + i);
+        __m256d prc1 = _mm256_loadu_pd(prices + i + 4);
+
+        // margin = lots * price * contract_size / leverage
+        __m256d margin0 = _mm256_mul_pd(lots0, prc0);
+        __m256d margin1 = _mm256_mul_pd(lots1, prc1);
+        margin0 = _mm256_mul_pd(margin0, contract_vec);
+        margin1 = _mm256_mul_pd(margin1, contract_vec);
+        margin0 = _mm256_mul_pd(margin0, leverage_inv);
+        margin1 = _mm256_mul_pd(margin1, leverage_inv);
+
+        sum0 = _mm256_add_pd(sum0, margin0);
+        sum1 = _mm256_add_pd(sum1, margin1);
+    }
+
+    // Combine and horizontal sum
+    sum0 = _mm256_add_pd(sum0, sum1);
+
+    __m128d lo = _mm256_castpd256_pd128(sum0);
+    __m128d hi = _mm256_extractf128_pd(sum0, 1);
+    lo = _mm_add_pd(lo, hi);
+    __m128d shuf = _mm_shuffle_pd(lo, lo, 1);
+    lo = _mm_add_pd(lo, shuf);
+
+    double result;
+    _mm_store_sd(&result, lo);
+
+    // Handle remainder
+    for (; i < n; ++i) {
+        result += lot_sizes[i] * prices[i] * contract_size / leverage;
     }
 
     return result;

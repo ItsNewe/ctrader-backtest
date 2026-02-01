@@ -6,6 +6,7 @@
 #include "position_validator.h"
 #include "currency_converter.h"
 #include "currency_rate_manager.h"
+#include "simd_intrinsics.h"
 #include <vector>
 #include <memory>
 #include <functional>
@@ -94,6 +95,8 @@ public:
           rate_manager_(config.account_currency, 60),
           tick_manager_(config.tick_data_config),
           peak_equity_(config.initial_balance) {
+        // Initialize SIMD CPU feature detection
+        simd::init();
     }
 
     // Strategy callback signature
@@ -211,6 +214,7 @@ public:
 
             Trade* trade = CreateTrade(direction, entry_price, lot_size, stop_loss, take_profit);
             open_positions_.push_back(trade);
+            InvalidateSimdCache();  // Mark SIMD cache dirty
             total_trades_opened_++;
 
             // Uncomment for per-trade logging:
@@ -253,6 +257,7 @@ public:
             std::remove(open_positions_.begin(), open_positions_.end(), trade),
             open_positions_.end()
         );
+        InvalidateSimdCache();  // Mark SIMD cache dirty
 
         if (config_.verbose) {
             std::cout << current_tick_.timestamp << " - CLOSE " << trade->direction
@@ -389,6 +394,47 @@ private:
     double max_drawdown_ = 0.0;
     double max_drawdown_percent_ = 0.0;
 
+    // SIMD-optimized position cache (updated when positions change)
+    // Separates BUY and SELL positions for vectorized operations
+    mutable bool simd_cache_dirty_ = true;
+    mutable std::vector<double> buy_entry_prices_;
+    mutable std::vector<double> buy_lot_sizes_;
+    mutable std::vector<double> sell_entry_prices_;
+    mutable std::vector<double> sell_lot_sizes_;
+    mutable std::vector<Trade*> buy_positions_;
+    mutable std::vector<Trade*> sell_positions_;
+
+    // Refresh SIMD cache when positions have changed
+    void RefreshSimdCache() const {
+        if (!simd_cache_dirty_) return;
+
+        buy_entry_prices_.clear();
+        buy_lot_sizes_.clear();
+        sell_entry_prices_.clear();
+        sell_lot_sizes_.clear();
+        buy_positions_.clear();
+        sell_positions_.clear();
+
+        for (Trade* trade : open_positions_) {
+            if (trade->direction == "BUY") {
+                buy_entry_prices_.push_back(trade->entry_price);
+                buy_lot_sizes_.push_back(trade->lot_size);
+                buy_positions_.push_back(trade);
+            } else {
+                sell_entry_prices_.push_back(trade->entry_price);
+                sell_lot_sizes_.push_back(trade->lot_size);
+                sell_positions_.push_back(trade);
+            }
+        }
+
+        simd_cache_dirty_ = false;
+    }
+
+    // Mark cache dirty when positions change
+    void InvalidateSimdCache() {
+        simd_cache_dirty_ = true;
+    }
+
     double GetPipValue() const {
         // Use configurable pip size (0.00001 for forex, 0.01 for gold, 0.001 for JPY)
         return config_.pip_size;
@@ -425,16 +471,52 @@ private:
     void UpdateEquity(const Tick& tick) {
         equity_ = balance_;
 
-        // Add unrealized P/L from open positions
-        for (Trade* trade : open_positions_) {
-            double current_price = (trade->direction == "BUY") ? tick.bid : tick.ask;
-            double price_diff = current_price - trade->entry_price;
-            if (trade->direction == "SELL") {
-                price_diff = -price_diff;
+        // SIMD-optimized P/L calculation for large position counts
+        const size_t SIMD_THRESHOLD = 8;  // Use SIMD for 8+ positions
+
+        if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            RefreshSimdCache();
+
+            // Process BUY positions with SIMD
+            if (!buy_entry_prices_.empty()) {
+                std::vector<double> buy_pnl(buy_entry_prices_.size());
+                simd::calculate_pnl_batch(
+                    buy_entry_prices_.data(),
+                    buy_lot_sizes_.data(),
+                    tick.bid,  // BUY positions close at bid
+                    config_.contract_size,
+                    buy_pnl.data(),
+                    buy_entry_prices_.size(),
+                    true  // is_buy = true
+                );
+                equity_ += simd::sum(buy_pnl.data(), buy_pnl.size());
             }
-            // Use actual contract size (100 for XAUUSD, 100000 for Forex)
-            double unrealized_pl = price_diff * trade->lot_size * config_.contract_size;
-            equity_ += unrealized_pl;
+
+            // Process SELL positions with SIMD
+            if (!sell_entry_prices_.empty()) {
+                std::vector<double> sell_pnl(sell_entry_prices_.size());
+                simd::calculate_pnl_batch(
+                    sell_entry_prices_.data(),
+                    sell_lot_sizes_.data(),
+                    tick.ask,  // SELL positions close at ask
+                    config_.contract_size,
+                    sell_pnl.data(),
+                    sell_entry_prices_.size(),
+                    false  // is_buy = false
+                );
+                equity_ += simd::sum(sell_pnl.data(), sell_pnl.size());
+            }
+        } else {
+            // Scalar fallback for small position counts
+            for (Trade* trade : open_positions_) {
+                double current_price = (trade->direction == "BUY") ? tick.bid : tick.ask;
+                double price_diff = current_price - trade->entry_price;
+                if (trade->direction == "SELL") {
+                    price_diff = -price_diff;
+                }
+                double unrealized_pl = price_diff * trade->lot_size * config_.contract_size;
+                equity_ += unrealized_pl;
+            }
         }
 
         // Track max drawdown
@@ -457,13 +539,47 @@ private:
             return;  // No positions, no margin risk
         }
 
-        // Calculate used margin (required margin for all open positions)
         double used_margin = 0.0;
-        for (Trade* trade : open_positions_) {
-            double current_price = (trade->direction == "BUY") ? tick.ask : tick.bid;
-            // Margin = Lots × Contract_Size × Price / Leverage × Margin_Rate
-            double position_margin = trade->lot_size * config_.contract_size * current_price / config_.leverage * config_.margin_rate;
-            used_margin += position_margin;
+        const size_t SIMD_THRESHOLD = 8;
+
+        if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            // SIMD-optimized margin calculation
+            RefreshSimdCache();
+
+            // For margin, we use ask for BUY and bid for SELL
+            // Margin = lots * contract_size * price / leverage * margin_rate
+            double margin_factor = config_.contract_size / config_.leverage * config_.margin_rate;
+
+            // BUY positions use ask price for margin
+            if (!buy_lot_sizes_.empty()) {
+                std::vector<double> buy_prices(buy_lot_sizes_.size(), tick.ask);
+                used_margin += simd::total_margin_batch_avx2_optimized(
+                    buy_lot_sizes_.data(),
+                    buy_prices.data(),
+                    buy_lot_sizes_.size(),
+                    config_.contract_size,
+                    config_.leverage
+                ) * config_.margin_rate;
+            }
+
+            // SELL positions use bid price for margin
+            if (!sell_lot_sizes_.empty()) {
+                std::vector<double> sell_prices(sell_lot_sizes_.size(), tick.bid);
+                used_margin += simd::total_margin_batch_avx2_optimized(
+                    sell_lot_sizes_.data(),
+                    sell_prices.data(),
+                    sell_lot_sizes_.size(),
+                    config_.contract_size,
+                    config_.leverage
+                ) * config_.margin_rate;
+            }
+        } else {
+            // Scalar fallback
+            for (Trade* trade : open_positions_) {
+                double current_price = (trade->direction == "BUY") ? tick.ask : tick.bid;
+                double position_margin = trade->lot_size * config_.contract_size * current_price / config_.leverage * config_.margin_rate;
+                used_margin += position_margin;
+            }
         }
 
         if (used_margin <= 0) {

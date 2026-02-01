@@ -543,11 +543,38 @@ private:
         highest_buy_ = DBL_MIN;
         volume_of_open_trades_ = 0.0;
 
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
-                volume_of_open_trades_ += trade->lot_size;
-                lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
-                highest_buy_ = std::max(highest_buy_, trade->entry_price);
+        const auto& positions = engine.GetOpenPositions();
+        const size_t SIMD_THRESHOLD = 16;
+
+        // SIMD-optimized path for large position counts
+        if (positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            // Collect BUY position data for vectorized operations
+            std::vector<double> buy_prices;
+            std::vector<double> buy_lots;
+            buy_prices.reserve(positions.size());
+            buy_lots.reserve(positions.size());
+
+            for (const Trade* trade : positions) {
+                if (trade->direction == "BUY") {
+                    buy_prices.push_back(trade->entry_price);
+                    buy_lots.push_back(trade->lot_size);
+                }
+            }
+
+            if (!buy_prices.empty()) {
+                // Vectorized sum, min, max
+                volume_of_open_trades_ = simd::sum(buy_lots.data(), buy_lots.size());
+                lowest_buy_ = simd::min_value(buy_prices.data(), buy_prices.size());
+                highest_buy_ = simd::max_value(buy_prices.data(), buy_prices.size());
+            }
+        } else {
+            // Scalar fallback for small position counts
+            for (const Trade* trade : positions) {
+                if (trade->direction == "BUY") {
+                    volume_of_open_trades_ += trade->lot_size;
+                    lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
+                    highest_buy_ = std::max(highest_buy_, trade->entry_price);
+                }
             }
         }
     }
@@ -555,8 +582,29 @@ private:
     double CalculateLotSize(TickBasedEngine& engine, int positions_total) {
         // Similar to original but with anti-fragile scaling
         double used_margin = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
+        const auto& positions = engine.GetOpenPositions();
+        const size_t SIMD_THRESHOLD = 16;
+
+        if (positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            // SIMD-optimized margin calculation
+            std::vector<double> lot_sizes;
+            std::vector<double> prices;
+            lot_sizes.reserve(positions.size());
+            prices.reserve(positions.size());
+
+            for (const Trade* trade : positions) {
+                lot_sizes.push_back(trade->lot_size);
+                prices.push_back(trade->entry_price);
+            }
+
+            used_margin = simd::total_margin_batch_avx2_optimized(
+                lot_sizes.data(), prices.data(), lot_sizes.size(),
+                contract_size_, leverage_
+            );
+        } else {
+            for (const Trade* trade : positions) {
+                used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
+            }
         }
 
         double margin_stop_out = 20.0;
