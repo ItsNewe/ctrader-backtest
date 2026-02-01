@@ -1,30 +1,40 @@
-; FillUp_CombinedJu preset: FULL_JU_THR3
-; Backtest: 18.61x return, 68.5% DD (2025)
-; Threshold at position 3, multiplier 2.0x (more aggressive)
+; CombinedJu_EA Preset: s12_sp1.0_tpLIN_szTHR_p3_m2.0_v1 (THR3 - TESTED)
+; THR3 configuration from 800-config sweep: 20.88x return, 83.8% DD
+; Settings: survive=12%, spacing=$1.0, LINEAR TP, THRESHOLD sizing (pos=3, mult=2.0), velocity ON
 ;
-; Use for: XAUUSD with 1:500 leverage
-; Note: Earlier threshold = slightly higher return but slightly higher DD
-
-SurvivePct=13.0
-BaseSpacing=1.5
+; IMPORTANT: ForceMinVolumeEntry=false ensures crash survival
+; This is #3 overall in the sweep rankings
+;
+; === Core Grid Parameters ===
+SurvivePct=12.0
+BaseSpacing=1.0
 MinVolume=0.01
 MaxVolume=10.0
-
+; === Volatility Adaptation ===
 VolatilityLookbackHours=4.0
 TypicalVolPct=0.55
 MinSpacingMult=0.5
 MaxSpacingMult=3.0
-
-EnableRubberBandTP=true
+MinSpacingAbs=0.5
+MaxSpacingAbs=5.0
+SpacingChangeThreshold=0.1
+; === Take Profit Mode ===
+TPMode=2
 TPSqrtScale=0.5
-TPMinimum=1.5
-
+TPLinearScale=0.3
+TPMin=1.0
+; === Velocity Filter (Wu Wei) ===
 EnableVelocityFilter=true
 VelocityWindow=10
 VelocityThresholdPct=0.01
-
-EnableBarbellSizing=true
-BarbellThresholdPos=3
-BarbellMultiplier=2.0
-
+; === Position Sizing ===
+SizingMode=2
+SizingLinearScale=0.5
+SizingThresholdPos=3
+SizingThresholdMult=2.0
+; === Safety Settings ===
+ForceMinVolumeEntry=false
+; === Trading Settings ===
 MagicNumber=789003
+TradeComment=CombinedJu_THR3
+Slippage=30

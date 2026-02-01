@@ -48,6 +48,10 @@ input double SizingLinearScale = 0.5;        // LINEAR mode: scale per position
 input int SizingThresholdPos = 5;            // THRESHOLD mode: position count threshold
 input double SizingThresholdMult = 2.0;      // THRESHOLD mode: lot multiplier after threshold
 
+input group "=== Safety Settings ==="
+input bool ForceMinVolumeEntry = false;      // Force entry at MinVolume when lot sizing = 0
+                                              // WARNING: force=true can cause stop-out during crashes!
+
 input group "=== Trading Settings ==="
 input int MagicNumber = 20260127;            // Magic number for this EA
 input string TradeComment = "CombinedJu";    // Trade comment
@@ -384,12 +388,20 @@ bool OpenPosition(double lots, double tp)
 {
     bool wasForced = false;
 
-    // Force minimum volume if lot sizing returns 0
+    // Handle when lot sizing returns 0 (margin protection triggered)
     if(lots < MinVolume)
     {
+        lotZeroForced++;
+
+        if(!ForceMinVolumeEntry)
+        {
+            // Respect lot sizing safety - skip this entry
+            return false;
+        }
+
+        // Force entry at MinVolume (WARNING: can cause crash stop-out!)
         lots = MinVolume;
         wasForced = true;
-        lotZeroForced++;
     }
 
     lots = NormalizeLots(lots);

@@ -64,6 +64,13 @@ public:
         int sizing_threshold_pos;      // For THRESHOLD_SIZING
         double sizing_threshold_mult;  // Multiplier after threshold
 
+        // Safety Settings
+        bool force_min_volume_entry;   // When lot sizing returns 0, force entry at min_volume?
+                                       // WARNING: force=true can cause stop-out during crashes!
+
+        // Percentage-based spacing (for instruments with large price changes like XAGUSD)
+        bool pct_spacing;              // If true, base_spacing and tp_min are interpreted as % of price
+
         Config()
             : survive_pct(13.0),
               base_spacing(1.50),
@@ -83,7 +90,9 @@ public:
               sizing_mode(UNIFORM),
               sizing_linear_scale(0.5),
               sizing_threshold_pos(5),
-              sizing_threshold_mult(2.0) {}
+              sizing_threshold_mult(2.0),
+              force_min_volume_entry(false),    // Default: OFF for crash safety
+              pct_spacing(false) {}             // Default: absolute spacing (for gold)
     };
 
     struct Stats {
@@ -220,10 +229,24 @@ private:
             double vol_ratio = range / typical_vol;
             vol_ratio = std::max(0.5, std::min(3.0, vol_ratio));
 
-            double new_spacing = config_.base_spacing * vol_ratio;
-            new_spacing = std::max(0.5, std::min(5.0, new_spacing));
+            double base_spacing_abs;
+            if (config_.pct_spacing) {
+                // Percentage mode: base_spacing is % of price
+                base_spacing_abs = current_bid_ * (config_.base_spacing / 100.0);
+            } else {
+                // Absolute mode: base_spacing is $ value
+                base_spacing_abs = config_.base_spacing;
+            }
 
-            if (std::abs(new_spacing - current_spacing_) > 0.1) {
+            double new_spacing = base_spacing_abs * vol_ratio;
+
+            // Clamp spacing to reasonable range
+            double min_spacing = config_.pct_spacing ? current_bid_ * 0.001 : 0.5;  // 0.1% or $0.50
+            double max_spacing = config_.pct_spacing ? current_bid_ * 0.10 : 5.0;   // 10% or $5.00
+            new_spacing = std::max(min_spacing, std::min(max_spacing, new_spacing));
+
+            double threshold = config_.pct_spacing ? current_bid_ * 0.001 : 0.1;
+            if (std::abs(new_spacing - current_spacing_) > threshold) {
                 current_spacing_ = new_spacing;
             }
         }
@@ -241,19 +264,24 @@ private:
 
         double deviation = std::abs(first_entry_price_ - current_ask_);
 
+        // Convert tp_min to absolute value if using pct_spacing
+        double tp_min_abs = config_.pct_spacing
+            ? current_ask_ * (config_.tp_min / 100.0)
+            : config_.tp_min;
+
         switch (config_.tp_mode) {
             case FIXED:
                 return current_ask_ + current_spread_ + current_spacing_;
 
             case SQRT: {
                 double tp_addition = config_.tp_sqrt_scale * std::sqrt(deviation);
-                double tp = current_ask_ + current_spread_ + std::max(config_.tp_min, tp_addition);
+                double tp = current_ask_ + current_spread_ + std::max(tp_min_abs, tp_addition);
                 return tp;
             }
 
             case LINEAR: {
                 double tp_addition = config_.tp_linear_scale * deviation;
-                double tp = current_ask_ + current_spread_ + std::max(config_.tp_min, tp_addition);
+                double tp = current_ask_ + current_spread_ + std::max(tp_min_abs, tp_addition);
                 return tp;
             }
         }
@@ -391,11 +419,15 @@ private:
                 // Calculate base lot size (already respects margin)
                 double lots = CalculateLotSize(engine, positions_total);
 
-                // Track when lot sizing returns 0, but still force entry at min_volume
-                // This "forced entry" approach produces better returns (28x vs 15x)
+                // Track when lot sizing returns 0
                 if (lots < config_.min_volume) {
                     stats_.lot_size_zero_blocks++;
-                    // Force entry at min_volume anyway - the key insight!
+                    // Respect force_min_volume_entry flag
+                    // WARNING: force=true can cause stop-out during crash scenarios!
+                    if (!config_.force_min_volume_entry) {
+                        return;  // Skip entry - respect lot sizing safety
+                    }
+                    // force=true: continue with min_volume
                 }
 
                 // Apply barbell sizing multiplier, but cap to preserve margin safety
@@ -408,8 +440,10 @@ private:
                 }
                 lots *= lot_mult;
 
-                // Ensure within bounds - forces min_volume even when lot sizing returns 0
-                lots = std::max(lots, config_.min_volume);
+                // Ensure within bounds
+                if (config_.force_min_volume_entry) {
+                    lots = std::max(lots, config_.min_volume);  // Force min if flag set
+                }
                 lots = std::min(lots, config_.max_volume);
 
                 // Calculate rubber band TP

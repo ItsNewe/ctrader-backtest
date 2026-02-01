@@ -1,32 +1,43 @@
-; FillUp_CombinedJu preset: P1_M3 (Maximum Return)
-; Backtest: 21.99x return, 72.6% DD (2025)
-; Backtest: 126x over 2 years (2024+2025)
-; Threshold at position 1, multiplier 3.0x (most aggressive)
+; CombinedJu_EA Preset: s12_sp0.5_tpLIN_szTHR_p1_m3.0_v1 (P1_M3 - AGGRESSIVE)
+; P1_M3 configuration from 800-config sweep: 17.27x return, 90.3% DD
+; Settings: survive=12%, spacing=$0.5, LINEAR TP, THRESHOLD sizing (pos=1, mult=3.0), velocity ON
 ;
-; Use for: XAUUSD with 1:500 leverage
-; WARNING: Higher DD than THR/THR3 configs - use with caution
-; Recommended for accounts that can tolerate 70%+ drawdown
-
-SurvivePct=13.0
-BaseSpacing=1.5
+; WARNING: Most aggressive config - 90%+ drawdown!
+; IMPORTANT: ForceMinVolumeEntry=false ensures crash survival
+;
+; Note: mult=2.0 configs (22.11x, 83.4% DD) outperform mult=3.0 configs
+; Consider using CombinedJu_XAUUSD_Best.set instead for better risk-adjusted returns
+;
+; === Core Grid Parameters ===
+SurvivePct=12.0
+BaseSpacing=0.5
 MinVolume=0.01
 MaxVolume=10.0
-
+; === Volatility Adaptation ===
 VolatilityLookbackHours=4.0
 TypicalVolPct=0.55
 MinSpacingMult=0.5
 MaxSpacingMult=3.0
-
-EnableRubberBandTP=true
+MinSpacingAbs=0.5
+MaxSpacingAbs=5.0
+SpacingChangeThreshold=0.1
+; === Take Profit Mode ===
+TPMode=2
 TPSqrtScale=0.5
-TPMinimum=1.5
-
+TPLinearScale=0.3
+TPMin=1.0
+; === Velocity Filter (Wu Wei) ===
 EnableVelocityFilter=true
 VelocityWindow=10
 VelocityThresholdPct=0.01
-
-EnableBarbellSizing=true
-BarbellThresholdPos=1
-BarbellMultiplier=3.0
-
+; === Position Sizing ===
+SizingMode=2
+SizingLinearScale=0.5
+SizingThresholdPos=1
+SizingThresholdMult=3.0
+; === Safety Settings ===
+ForceMinVolumeEntry=false
+; === Trading Settings ===
 MagicNumber=789013
+TradeComment=CombinedJu_P1M3
+Slippage=30

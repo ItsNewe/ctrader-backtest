@@ -2,6 +2,8 @@
 
 Custom slash commands for the ctrader-backtest project.
 
+**See `/CLAUDE.md` for full framework documentation on building strategy tests.**
+
 ## Strategy Validation
 
 ### /validate-strategy

@@ -1,6 +1,8 @@
-; CombinedJu_EA Preset: s12_sp1.0_tpSQR_szTHR_v1
-; Second best configuration: 41.69x return, 80.72% DD (lower DD!)
-; Settings: survive=12%, spacing=$1.0, SQRT TP, THRESHOLD sizing, velocity ON
+; CombinedJu_EA Preset: s12_sp1.0_tpLIN_szTHR_p2_m2.0_v1 (#2 CRASH-SAFE)
+; #2 configuration from 800-config sweep: 21.51x return, 83.8% DD
+; Settings: survive=12%, spacing=$1.0, LINEAR TP, THRESHOLD sizing (pos=2, mult=2.0), velocity ON
+;
+; IMPORTANT: ForceMinVolumeEntry=false ensures crash survival
 ;
 ; === Core Grid Parameters ===
 SurvivePct=12.0
@@ -16,7 +18,7 @@ MinSpacingAbs=0.5
 MaxSpacingAbs=5.0
 SpacingChangeThreshold=0.1
 ; === Take Profit Mode ===
-TPMode=1
+TPMode=2
 TPSqrtScale=0.5
 TPLinearScale=0.3
 TPMin=1.0
@@ -27,8 +29,10 @@ VelocityThresholdPct=0.01
 ; === Position Sizing ===
 SizingMode=2
 SizingLinearScale=0.5
-SizingThresholdPos=5
+SizingThresholdPos=2
 SizingThresholdMult=2.0
+; === Safety Settings ===
+ForceMinVolumeEntry=false
 ; === Trading Settings ===
 MagicNumber=20260128
 TradeComment=CombinedJu_VelFilter

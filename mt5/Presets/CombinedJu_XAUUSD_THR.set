@@ -1,29 +1,40 @@
-; FillUp_CombinedJu preset: FULL_JU_THR
-; Backtest: 18.17x return, 68.1% DD (2025)
-; Threshold at position 5, multiplier 2.0x
+; CombinedJu_EA Preset: s12_sp1.0_tpLIN_szTHR_p5_m2.0_v1 (THR5 - TESTED)
+; THR5 configuration from 800-config sweep: 19.53x return, 84.5% DD
+; Settings: survive=12%, spacing=$1.0, LINEAR TP, THRESHOLD sizing (pos=5, mult=2.0), velocity ON
 ;
-; Use for: XAUUSD with 1:500 leverage
-
-SurvivePct=13.0
-BaseSpacing=1.5
+; IMPORTANT: ForceMinVolumeEntry=false ensures crash survival
+; More conservative threshold than pos=1 or pos=3 variants
+;
+; === Core Grid Parameters ===
+SurvivePct=12.0
+BaseSpacing=1.0
 MinVolume=0.01
 MaxVolume=10.0
-
+; === Volatility Adaptation ===
 VolatilityLookbackHours=4.0
 TypicalVolPct=0.55
 MinSpacingMult=0.5
 MaxSpacingMult=3.0
-
-EnableRubberBandTP=true
+MinSpacingAbs=0.5
+MaxSpacingAbs=5.0
+SpacingChangeThreshold=0.1
+; === Take Profit Mode ===
+TPMode=2
 TPSqrtScale=0.5
-TPMinimum=1.5
-
+TPLinearScale=0.3
+TPMin=1.0
+; === Velocity Filter (Wu Wei) ===
 EnableVelocityFilter=true
 VelocityWindow=10
 VelocityThresholdPct=0.01
-
-EnableBarbellSizing=true
-BarbellThresholdPos=5
-BarbellMultiplier=2.0
-
+; === Position Sizing ===
+SizingMode=2
+SizingLinearScale=0.5
+SizingThresholdPos=5
+SizingThresholdMult=2.0
+; === Safety Settings ===
+ForceMinVolumeEntry=false
+; === Trading Settings ===
 MagicNumber=789005
+TradeComment=CombinedJu_THR
+Slippage=30

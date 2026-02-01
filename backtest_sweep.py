@@ -46,33 +46,35 @@ class ParameterGenerator:
     ) -> Generator[Dict, None, None]:
         """
         Generate parameter combinations using grid search
-        
+
         Args:
             survive_range: (min, max, step) for survive parameter
             size_range: (min, max, step) for size parameter
             spacing_range: (min, max, step) for spacing parameter
-            
+
         Yields:
             Dict with parameter combinations
         """
         survive_min, survive_max, survive_step = survive_range
         size_min, size_max, size_step = size_range
         spacing_min, spacing_max, spacing_step = spacing_range
-        
-        survive = survive_min
-        while survive <= survive_max:
-            size = size_min
-            while size <= size_max:
-                spacing = spacing_min
-                while spacing <= spacing_max:
+
+        # Use integer step counts to avoid floating-point accumulation errors
+        survive_steps = int(round((survive_max - survive_min) / survive_step)) + 1
+        size_steps = int(round((size_max - size_min) / size_step)) + 1
+        spacing_steps = int(round((spacing_max - spacing_min) / spacing_step)) + 1
+
+        for i in range(survive_steps):
+            survive = survive_min + i * survive_step
+            for j in range(size_steps):
+                size = size_min + j * size_step
+                for k in range(spacing_steps):
+                    spacing = spacing_min + k * spacing_step
                     yield {
                         'survive': round(survive, 2),
                         'size': round(size, 2),
                         'spacing': round(spacing, 2),
                     }
-                    spacing += spacing_step
-                size += size_step
-            survive += survive_step
     
     @staticmethod
     def random_search(

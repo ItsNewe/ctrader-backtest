@@ -25,7 +25,8 @@ class FillUpStrategy {
 public:
     FillUpStrategy(double survive_pct, double size_multiplier, double spacing_dollars,
                    double min_volume, double max_volume, double contract_size,
-                   double leverage, int symbol_digits = 2, double margin_rate = 1.0)
+                   double leverage, int symbol_digits = 2, double margin_rate = 1.0,
+                   bool enable_dd_protection = false, double dd_threshold_pct = 50.0)
         : survive_pct_(survive_pct),
           size_multiplier_(size_multiplier),
           debug_counter_(0),
@@ -44,7 +45,11 @@ public:
           max_balance_(0.0),
           max_number_of_open_(0),
           max_used_funds_(0.0),
-          max_trade_size_(0.0)
+          max_trade_size_(0.0),
+          enable_dd_protection_(enable_dd_protection),
+          dd_threshold_pct_(dd_threshold_pct),
+          peak_equity_(0.0),
+          dd_triggers_(0)
     {
     }
 
@@ -56,6 +61,38 @@ public:
         // Update account state
         current_equity_ = engine.GetEquity();
         current_balance_ = engine.GetBalance();
+
+        // Initialize peak equity on first tick
+        if (peak_equity_ == 0.0) {
+            peak_equity_ = current_equity_;
+        }
+
+        // DD Protection: check BEFORE updating peak (to trigger on threshold breach)
+        if (enable_dd_protection_ && !engine.GetOpenPositions().empty() && peak_equity_ > 0) {
+            double dd_pct = (peak_equity_ - current_equity_) / peak_equity_ * 100.0;
+            if (dd_pct > dd_threshold_pct_) {
+                // Close all positions
+                std::vector<Trade*> positions_copy;
+                for (Trade* t : engine.GetOpenPositions()) {
+                    positions_copy.push_back(t);
+                }
+                for (Trade* t : positions_copy) {
+                    engine.ClosePosition(t, "DD_PROTECTION");
+                }
+                dd_triggers_++;
+                // Reset peak to current equity after closing
+                peak_equity_ = engine.GetBalance();
+                // Reset grid tracking
+                lowest_buy_ = DBL_MAX;
+                highest_buy_ = DBL_MIN;
+                return;
+            }
+        }
+
+        // Update peak equity AFTER DD check
+        if (current_equity_ > peak_equity_) {
+            peak_equity_ = current_equity_;
+        }
 
         // Update statistics
         max_balance_ = std::max(max_balance_, current_balance_);
@@ -73,6 +110,8 @@ public:
     int GetMaxNumberOfOpen() const { return max_number_of_open_; }
     double GetMaxUsedFunds() const { return max_used_funds_; }
     double GetMaxTradeSize() const { return max_trade_size_; }
+    int GetDDTriggers() const { return dd_triggers_; }
+    double GetPeakEquity() const { return peak_equity_; }
 
 private:
     // Strategy parameters
@@ -110,6 +149,12 @@ private:
     double max_used_funds_;
     double max_trade_size_;
 
+    // DD Protection
+    bool enable_dd_protection_;
+    double dd_threshold_pct_;
+    double peak_equity_;
+    int dd_triggers_;
+
     // Debug
     int debug_counter_;
 
@@ -118,7 +163,7 @@ private:
         lowest_buy_ = DBL_MAX;
         highest_buy_ = DBL_MIN;
         closest_above_ = DBL_MAX;
-        closest_below_ = DBL_MIN;
+        closest_below_ = DBL_MAX;  // Must be DBL_MAX (like MT5) for gap-fill condition to work
         volume_of_open_trades_ = 0.0;
 
         const auto& positions = engine.GetOpenPositions();
@@ -179,7 +224,6 @@ private:
             double margin_level = (used_margin > 0) ? (equity_at_target / used_margin * 100.0) : 10000.0;
 
             double trade_size = min_volume_;
-            double starting_price = current_ask_;
 
             if (margin_level > margin_stop_out_level) {
                 // Calculate required equity for all trades in grid
@@ -187,11 +231,11 @@ private:
                 double d_spread = number_of_trades * trade_size * current_spread_ * contract_size_;
                 d_equity += d_spread;
 
-                // Calculate required margin using FOREX mode (MT5 quirk!)
-                // MT5 uses FOREX mode here even though actual positions use CFD_LEVERAGE
-                double local_used_margin = CalculateMarginForSizing(trade_size);
-                local_used_margin += CalculateMarginForSizing(trade_size);
-                local_used_margin = local_used_margin / 2;
+                // Calculate required margin using FOREX mode (matching MT5 EA behavior)
+                // MT5 EA uses: trade_size * contract_size / leverage (no price dependency)
+                // Note: Although ACCOUNT_MARGIN is price-dependent for XAG/USD,
+                // the EA's sizing projection uses the raw FOREX formula
+                double local_used_margin = trade_size * contract_size_ / leverage_;
                 local_used_margin = number_of_trades * local_used_margin;
 
                 // Debug output for first 10 sizing calls
@@ -269,11 +313,14 @@ private:
 
     double CalculateUsedMargin(TickBasedEngine& engine) {
         // Calculate used margin for all open positions
+        // Uses CURRENT market price (matching MT5's AccountInfoDouble(ACCOUNT_MARGIN))
         double used_margin = 0.0;
         const auto& positions = engine.GetOpenPositions();
 
         for (const Trade* trade : positions) {
-            used_margin += CalculateMarginForTrade(trade->lot_size, trade->entry_price);
+            // Use current bid for BUY positions (current market price for margin)
+            double price = (trade->direction == "BUY") ? current_bid_ : current_ask_;
+            used_margin += CalculateMarginForTrade(trade->lot_size, price);
         }
 
         return used_margin;
@@ -286,13 +333,8 @@ private:
         return lots * contract_size_ * price / leverage_ * margin_rate_;
     }
 
-    double CalculateMarginForSizing(double lots) {
-        // CRITICAL: MT5 uses FOREX mode (no price) in the sizing algorithm
-        // even though actual positions use CFD_LEVERAGE mode!
-        // This underestimates margin, making the algorithm more conservative
-        // Margin = Lots * Contract_Size / Leverage * MarginRate
-        return lots * contract_size_ / leverage_ * margin_rate_;
-    }
+    // Note: CalculateMarginForSizing is no longer used - CFDLEVERAGE margin
+    // is now computed inline in SizingBuy using starting_price and end_price
 
     bool Open(double local_unit, TickBasedEngine& engine) {
         if (local_unit < min_volume_) {

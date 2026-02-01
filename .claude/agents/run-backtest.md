@@ -2,6 +2,15 @@
 
 Agent for compiling and running C++ backtests with proper configuration.
 
+**IMPORTANT:** Read `/CLAUDE.md` first for the full framework documentation.
+
+## Key Principle
+
+**Always use `TickBasedEngine`** - never create standalone strategy classes with their own swap/margin logic. The engine handles:
+- Swap fees (daily, triple on Thursday)
+- Margin stop-out (20% level)
+- Proper MT5-compatible date filtering
+
 ## When to Use
 - Running a backtest with specific broker settings
 - Comparing results across different parameter sets
@@ -39,13 +48,25 @@ Grid:
 ```
 
 ## Compilation Commands
+
+### Using CMake (Recommended)
+```bash
+cd build
+cmake .. -G "MinGW Makefiles"
+mingw32-make test_my_strategy
+```
+
+### Manual Compilation
 ```bash
 # Windows (MSVC)
 cl /EHsc /O2 /I include validation/test_fill_up.cpp /Fe:test_fill_up.exe
 
-# Windows (MinGW)
-g++ -std=c++17 -O2 -I include validation/test_fill_up.cpp -o test_fill_up.exe
+# Windows (MinGW) - MUST use static linking!
+g++ -std=c++17 -O3 -I include validation/test_fill_up.cpp -o test_fill_up.exe \
+    -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic
 ```
+
+**Note:** Without static linking, MinGW executables will fail silently on Windows.
 
 ## Output Files
 - Console output with trade log

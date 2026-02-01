@@ -422,7 +422,7 @@ def validate_backtest_config(config):
         end = datetime.fromisoformat(config.get('end_date', ''))
         if start >= end:
             errors.append("Start date must be before end date")
-    except:
+    except (ValueError, TypeError):
         errors.append("Invalid date format")
 
     # Validate numbers
@@ -432,7 +432,7 @@ def validate_backtest_config(config):
             value = float(config.get(field, 0))
             if field == 'lot_size' and value <= 0:
                 errors.append("Lot size must be positive")
-        except:
+        except (ValueError, TypeError):
             errors.append(f"Invalid number for {field}")
 
     return errors
@@ -812,10 +812,17 @@ if __name__ == '__main__':
         logger.warning(f"Backtest executable not found at {BACKTEST_EXE}")
         logger.info("Using mock backtest results for demo")
 
+    # Server configuration from environment variables
+    # Default to localhost for security (use FLASK_HOST=0.0.0.0 to expose to network)
+    server_host = os.environ.get('FLASK_HOST', '127.0.0.1')
+    server_port = int(os.environ.get('FLASK_PORT', '5000'))
+
+    logger.info(f"Server binding to {server_host}:{server_port}")
+
     # Run Flask app
     app.run(
-        host='0.0.0.0',
-        port=5000,
+        host=server_host,
+        port=server_port,
         debug=False,
         threaded=True
     )
