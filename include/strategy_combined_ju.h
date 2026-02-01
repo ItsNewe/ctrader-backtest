@@ -313,7 +313,7 @@ private:
         position_count_ = 0;
 
         for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
+            if (trade->IsBuy()) {
                 volume_of_open_trades_ += trade->lot_size;
                 lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
                 highest_buy_ = std::max(highest_buy_, trade->entry_price);
@@ -378,7 +378,7 @@ private:
         double final_lots = std::min(lots, config_.max_volume);
         final_lots = std::round(final_lots * 100.0) / 100.0;
 
-        Trade* trade = engine.OpenMarketOrder("BUY", final_lots, 0.0, tp);
+        Trade* trade = engine.OpenMarketOrder(TradeDirection::BUY, final_lots, 0.0, tp);
         if (trade != nullptr) {
             stats_.entries_allowed++;
             stats_.total_tp_set += tp - current_ask_;
