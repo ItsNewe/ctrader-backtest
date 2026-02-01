@@ -294,15 +294,17 @@ private:
     long last_meta_reset_seconds_;          // Last meta-volatility reset (seconds)
 
     // Parse "YYYY.MM.DD HH:MM:SS.mmm" to seconds since reference
+    // Optimized: zero-allocation manual parsing (no substr/stoi)
     static long ParseTimestampToSeconds(const std::string& ts) {
         if (ts.size() < 19) return 0;
-        int year = std::stoi(ts.substr(0, 4));
-        int month = std::stoi(ts.substr(5, 2));
-        int day = std::stoi(ts.substr(8, 2));
-        int hour = std::stoi(ts.substr(11, 2));
-        int minute = std::stoi(ts.substr(14, 2));
-        int second = std::stoi(ts.substr(17, 2));
-        int month_days[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+        // Fast manual digit extraction
+        int year = (ts[0] - '0') * 1000 + (ts[1] - '0') * 100 + (ts[2] - '0') * 10 + (ts[3] - '0');
+        int month = (ts[5] - '0') * 10 + (ts[6] - '0');
+        int day = (ts[8] - '0') * 10 + (ts[9] - '0');
+        int hour = (ts[11] - '0') * 10 + (ts[12] - '0');
+        int minute = (ts[14] - '0') * 10 + (ts[15] - '0');
+        int second = (ts[17] - '0') * 10 + (ts[18] - '0');
+        static const int month_days[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
         long days = (long)(year - 2020) * 365 + (year - 2020) / 4;
         days += month_days[month - 1] + day;
         if (month > 2 && year % 4 == 0) days++;
@@ -543,11 +545,38 @@ private:
         highest_buy_ = DBL_MIN;
         volume_of_open_trades_ = 0.0;
 
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
-                volume_of_open_trades_ += trade->lot_size;
-                lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
-                highest_buy_ = std::max(highest_buy_, trade->entry_price);
+        const auto& positions = engine.GetOpenPositions();
+        const size_t SIMD_THRESHOLD = 16;
+
+        // SIMD-optimized path for large position counts
+        if (positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            // Collect BUY position data for vectorized operations
+            std::vector<double> buy_prices;
+            std::vector<double> buy_lots;
+            buy_prices.reserve(positions.size());
+            buy_lots.reserve(positions.size());
+
+            for (const Trade* trade : positions) {
+                if (trade->IsBuy()) {
+                    buy_prices.push_back(trade->entry_price);
+                    buy_lots.push_back(trade->lot_size);
+                }
+            }
+
+            if (!buy_prices.empty()) {
+                // Vectorized sum, min, max
+                volume_of_open_trades_ = simd::sum(buy_lots.data(), buy_lots.size());
+                lowest_buy_ = simd::min_value(buy_prices.data(), buy_prices.size());
+                highest_buy_ = simd::max_value(buy_prices.data(), buy_prices.size());
+            }
+        } else {
+            // Scalar fallback for small position counts
+            for (const Trade* trade : positions) {
+                if (trade->IsBuy()) {
+                    volume_of_open_trades_ += trade->lot_size;
+                    lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
+                    highest_buy_ = std::max(highest_buy_, trade->entry_price);
+                }
             }
         }
     }
@@ -555,8 +584,29 @@ private:
     double CalculateLotSize(TickBasedEngine& engine, int positions_total) {
         // Similar to original but with anti-fragile scaling
         double used_margin = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
+        const auto& positions = engine.GetOpenPositions();
+        const size_t SIMD_THRESHOLD = 16;
+
+        if (positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            // SIMD-optimized margin calculation
+            std::vector<double> lot_sizes;
+            std::vector<double> prices;
+            lot_sizes.reserve(positions.size());
+            prices.reserve(positions.size());
+
+            for (const Trade* trade : positions) {
+                lot_sizes.push_back(trade->lot_size);
+                prices.push_back(trade->entry_price);
+            }
+
+            used_margin = simd::total_margin_batch_avx2_optimized(
+                lot_sizes.data(), prices.data(), lot_sizes.size(),
+                contract_size_, leverage_
+            );
+        } else {
+            for (const Trade* trade : positions) {
+                used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
+            }
         }
 
         double margin_stop_out = 20.0;
@@ -580,16 +630,24 @@ private:
         double d_equity = contract_size_ * trade_size * current_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
         double d_margin = number_of_trades * trade_size * contract_size_ / leverage_;
 
-        // Find multiplier
+        // Find multiplier using binary search (O(log N) instead of O(N))
         double max_mult = max_volume_ / min_volume_;
-        for (double mult = max_mult; mult >= 1.0; mult -= 0.1) {
-            double test_equity = equity_at_target - mult * d_equity;
-            double test_margin = used_margin + mult * d_margin;
+        double low = 1.0, high = max_mult;
+        double best_mult = 1.0;  // Default to minimum if nothing works
+
+        // Binary search for largest valid multiplier
+        while (high - low > 0.05) {  // Precision to 0.05
+            double mid = (low + high) / 2.0;
+            double test_equity = equity_at_target - mid * d_equity;
+            double test_margin = used_margin + mid * d_margin;
             if (test_margin > 0 && (test_equity / test_margin * 100.0) > margin_stop_out) {
-                trade_size = mult * min_volume_;
-                break;
+                best_mult = mid;
+                low = mid;  // Try larger multipliers
+            } else {
+                high = mid;  // Need smaller multipliers
             }
         }
+        trade_size = best_mult * min_volume_;
 
         // Apply anti-fragile scaling
         trade_size *= GetAntifragileMultiplier();
@@ -613,7 +671,7 @@ private:
         final_lots = std::round(final_lots * 100.0) / 100.0;
 
         double tp = current_ask_ + current_spread_ + current_spacing_;
-        Trade* trade = engine.OpenMarketOrder("BUY", final_lots, 0.0, tp);
+        Trade* trade = engine.OpenMarketOrder(TradeDirection::BUY, final_lots, 0.0, tp);
         return (trade != nullptr);
     }
 
