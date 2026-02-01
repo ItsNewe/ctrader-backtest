@@ -30,6 +30,57 @@ inline const char* TradeDirectionStr(TradeDirection dir) {
 }
 
 /**
+ * Pending order types (limit and stop orders)
+ */
+enum class PendingOrderType : uint8_t {
+    BUY_LIMIT = 0,   // Buy at price below current (waiting for dip)
+    BUY_STOP = 1,    // Buy at price above current (breakout)
+    SELL_LIMIT = 2,  // Sell at price above current (waiting for spike)
+    SELL_STOP = 3    // Sell at price below current (breakdown)
+};
+
+inline const char* PendingOrderTypeStr(PendingOrderType type) {
+    switch (type) {
+        case PendingOrderType::BUY_LIMIT: return "BUY_LIMIT";
+        case PendingOrderType::BUY_STOP: return "BUY_STOP";
+        case PendingOrderType::SELL_LIMIT: return "SELL_LIMIT";
+        case PendingOrderType::SELL_STOP: return "SELL_STOP";
+        default: return "UNKNOWN";
+    }
+}
+
+/**
+ * Pending order structure for limit/stop orders
+ */
+struct PendingOrder {
+    int id;
+    std::string symbol;
+    PendingOrderType type;
+    double trigger_price;      // Price at which order activates
+    double lot_size;
+    double stop_loss;
+    double take_profit;
+    std::string created_time;
+    std::string expiry_time;   // Optional: order expiration (empty = GTC)
+
+    PendingOrder() : id(0), type(PendingOrderType::BUY_LIMIT),
+                     trigger_price(0), lot_size(0), stop_loss(0), take_profit(0) {}
+
+    bool IsBuyOrder() const {
+        return type == PendingOrderType::BUY_LIMIT || type == PendingOrderType::BUY_STOP;
+    }
+    bool IsSellOrder() const {
+        return type == PendingOrderType::SELL_LIMIT || type == PendingOrderType::SELL_STOP;
+    }
+    bool IsLimitOrder() const {
+        return type == PendingOrderType::BUY_LIMIT || type == PendingOrderType::SELL_LIMIT;
+    }
+    bool IsStopOrder() const {
+        return type == PendingOrderType::BUY_STOP || type == PendingOrderType::SELL_STOP;
+    }
+};
+
+/**
  * Simple trade structure for tick-based engine
  */
 struct Trade {
@@ -72,6 +123,7 @@ struct TickBacktestConfig {
     double leverage = 500.0;          // Leverage (1:500 for XAUUSD)
     double margin_rate = 1.0;         // Initial margin rate
     double pip_size = 0.00001;        // Pip size (0.00001 for 5-digit pairs, 0.001 for JPY, 0.01 for XAUUSD)
+    double stop_out_level = 20.0;     // Margin level % below which stop-out occurs (MT5 default: 20%)
 
     // Date filtering (MT5 behavior: start_date inclusive, end_date exclusive)
     std::string start_date = "";      // Format: YYYY.MM.DD (empty = no filter)
@@ -255,6 +307,59 @@ public:
     }
 
     /**
+     * Place a pending order (limit or stop)
+     * BUY_LIMIT: triggers when ask <= trigger_price (waiting for dip)
+     * BUY_STOP: triggers when ask >= trigger_price (breakout)
+     * SELL_LIMIT: triggers when bid >= trigger_price (waiting for spike)
+     * SELL_STOP: triggers when bid <= trigger_price (breakdown)
+     */
+    int PlacePendingOrder(PendingOrderType type, double trigger_price, double lot_size,
+                          double stop_loss = 0.0, double take_profit = 0.0,
+                          const std::string& expiry = "") {
+        PendingOrder order;
+        order.id = next_pending_order_id_++;
+        order.symbol = config_.symbol;
+        order.type = type;
+        order.trigger_price = trigger_price;
+        order.lot_size = lot_size;
+        order.stop_loss = stop_loss;
+        order.take_profit = take_profit;
+        order.created_time = current_tick_.timestamp;
+        order.expiry_time = expiry;
+
+        pending_orders_.push_back(order);
+
+        if (config_.verbose) {
+            std::cout << current_tick_.timestamp << " - PENDING " << PendingOrderTypeStr(type)
+                      << " " << lot_size << " lots @ " << trigger_price << std::endl;
+        }
+
+        return order.id;
+    }
+
+    /**
+     * Cancel a pending order by ID
+     */
+    bool CancelPendingOrder(int order_id) {
+        for (size_t i = 0; i < pending_orders_.size(); ++i) {
+            if (pending_orders_[i].id == order_id) {
+                if (config_.verbose) {
+                    std::cout << current_tick_.timestamp << " - CANCEL pending order #" << order_id << std::endl;
+                }
+                std::swap(pending_orders_[i], pending_orders_.back());
+                pending_orders_.pop_back();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get all pending orders
+     */
+    const std::vector<PendingOrder>& GetPendingOrders() const { return pending_orders_; }
+
+    /**
      * Close position at current tick price
      */
     bool ClosePosition(Trade* trade, const std::string& reason = "Manual") {
@@ -409,7 +514,13 @@ private:
     Tick current_tick_;
     std::vector<Trade*> open_positions_;
     std::vector<Trade> closed_trades_;
+    std::vector<PendingOrder> pending_orders_;  // Limit and stop orders
     size_t next_trade_id_ = 1;
+    size_t next_pending_order_id_ = 1;
+
+    // Pre-allocated vectors for UpdateEquity (pool allocator pattern)
+    mutable std::vector<double> pnl_buffer_buy_;
+    mutable std::vector<double> pnl_buffer_sell_;
 
     // Swap tracking
     std::string last_swap_date_ = "";
@@ -509,34 +620,39 @@ private:
         if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
             RefreshSimdCache();
 
-            // Process BUY positions with SIMD
+            // Process BUY positions with SIMD using pre-allocated buffer (pool allocator pattern)
             if (!buy_entry_prices_.empty()) {
-                std::vector<double> buy_pnl(buy_entry_prices_.size());
+                // Resize buffer only if needed (avoids allocation if already large enough)
+                if (pnl_buffer_buy_.size() < buy_entry_prices_.size()) {
+                    pnl_buffer_buy_.resize(buy_entry_prices_.size());
+                }
                 simd::calculate_pnl_batch(
                     buy_entry_prices_.data(),
                     buy_lot_sizes_.data(),
                     tick.bid,  // BUY positions close at bid
                     config_.contract_size,
-                    buy_pnl.data(),
+                    pnl_buffer_buy_.data(),
                     buy_entry_prices_.size(),
                     true  // is_buy = true
                 );
-                equity_ += simd::sum(buy_pnl.data(), buy_pnl.size());
+                equity_ += simd::sum(pnl_buffer_buy_.data(), buy_entry_prices_.size());
             }
 
-            // Process SELL positions with SIMD
+            // Process SELL positions with SIMD using pre-allocated buffer
             if (!sell_entry_prices_.empty()) {
-                std::vector<double> sell_pnl(sell_entry_prices_.size());
+                if (pnl_buffer_sell_.size() < sell_entry_prices_.size()) {
+                    pnl_buffer_sell_.resize(sell_entry_prices_.size());
+                }
                 simd::calculate_pnl_batch(
                     sell_entry_prices_.data(),
                     sell_lot_sizes_.data(),
                     tick.ask,  // SELL positions close at ask
                     config_.contract_size,
-                    sell_pnl.data(),
+                    pnl_buffer_sell_.data(),
                     sell_entry_prices_.size(),
                     false  // is_buy = false
                 );
-                equity_ += simd::sum(sell_pnl.data(), sell_pnl.size());
+                equity_ += simd::sum(pnl_buffer_sell_.data(), sell_entry_prices_.size());
             }
         } else {
             // Scalar fallback for small position counts
@@ -622,10 +738,8 @@ private:
         // Calculate margin level
         double margin_level = (equity_ / used_margin) * 100.0;
 
-        // MT5 stop-out level is typically 20%
-        const double STOP_OUT_LEVEL = 20.0;
-
-        if (margin_level < STOP_OUT_LEVEL) {
+        // Use configurable stop-out level (MT5 default: 20%)
+        if (margin_level < config_.stop_out_level) {
             // STOP OUT! Close all positions (MT5 behavior)
             if (config_.verbose) {
                 std::cout << "\n!!! MARGIN STOP OUT !!!" << std::endl;
@@ -649,8 +763,71 @@ private:
     }
 
     void ProcessPendingOrders(const Tick& tick) {
-        // TODO: Implement pending order execution (limit/stop orders)
-        // For now, only market orders are supported
+        if (pending_orders_.empty()) return;
+
+        std::vector<size_t> orders_to_execute;
+
+        for (size_t i = 0; i < pending_orders_.size(); ++i) {
+            const PendingOrder& order = pending_orders_[i];
+
+            // Check expiry
+            if (!order.expiry_time.empty() && tick.timestamp >= order.expiry_time) {
+                orders_to_execute.push_back(i);
+                continue;
+            }
+
+            bool triggered = false;
+
+            switch (order.type) {
+                case PendingOrderType::BUY_LIMIT:
+                    // BUY_LIMIT triggers when ask drops to or below trigger price
+                    triggered = (tick.ask <= order.trigger_price);
+                    break;
+                case PendingOrderType::BUY_STOP:
+                    // BUY_STOP triggers when ask rises to or above trigger price
+                    triggered = (tick.ask >= order.trigger_price);
+                    break;
+                case PendingOrderType::SELL_LIMIT:
+                    // SELL_LIMIT triggers when bid rises to or above trigger price
+                    triggered = (tick.bid >= order.trigger_price);
+                    break;
+                case PendingOrderType::SELL_STOP:
+                    // SELL_STOP triggers when bid drops to or below trigger price
+                    triggered = (tick.bid <= order.trigger_price);
+                    break;
+            }
+
+            if (triggered) {
+                orders_to_execute.push_back(i);
+            }
+        }
+
+        // Execute triggered orders (in reverse to maintain indices during removal)
+        for (auto it = orders_to_execute.rbegin(); it != orders_to_execute.rend(); ++it) {
+            size_t idx = *it;
+            const PendingOrder& order = pending_orders_[idx];
+
+            // Check if order expired vs triggered
+            bool expired = !order.expiry_time.empty() && tick.timestamp >= order.expiry_time;
+
+            if (!expired) {
+                // Convert pending order to market order
+                TradeDirection dir = order.IsBuyOrder() ? TradeDirection::BUY : TradeDirection::SELL;
+                Trade* trade = OpenMarketOrder(dir, order.lot_size, order.stop_loss, order.take_profit);
+
+                if (trade && config_.verbose) {
+                    std::cout << tick.timestamp << " - PENDING TRIGGERED " << PendingOrderTypeStr(order.type)
+                              << " -> Trade #" << trade->id << std::endl;
+                }
+            } else if (config_.verbose) {
+                std::cout << tick.timestamp << " - PENDING EXPIRED " << PendingOrderTypeStr(order.type)
+                          << " order #" << order.id << std::endl;
+            }
+
+            // Remove from pending orders (swap-and-pop)
+            std::swap(pending_orders_[idx], pending_orders_.back());
+            pending_orders_.pop_back();
+        }
     }
 
     void ProcessOpenPositions(const Tick& tick) {

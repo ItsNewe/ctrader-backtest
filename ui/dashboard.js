@@ -130,15 +130,50 @@ function validateForm() {
         errors.push('End date is required');
     }
 
-    if (parseFloat(document.getElementById('lotSize').value) <= 0) {
+    const lotSize = parseFloat(document.getElementById('lotSize').value);
+    if (isNaN(lotSize) || lotSize <= 0) {
         errors.push('Lot size must be greater than 0');
+    } else if (lotSize > 100) {
+        errors.push('Lot size cannot exceed 100');
     }
 
     const startDate = new Date(document.getElementById('startDate').value);
     const endDate = new Date(document.getElementById('endDate').value);
 
-    if (startDate >= endDate) {
+    if (isNaN(startDate.getTime())) {
+        errors.push('Invalid start date format');
+    } else if (isNaN(endDate.getTime())) {
+        errors.push('Invalid end date format');
+    } else if (startDate >= endDate) {
         errors.push('Start date must be before end date');
+    } else {
+        // Check date range isn't too large (> 5 years can be slow)
+        const daysDiff = (endDate - startDate) / (1000 * 60 * 60 * 24);
+        if (daysDiff > 1825) {
+            errors.push('Date range cannot exceed 5 years');
+        }
+    }
+
+    const startingBalance = parseFloat(document.getElementById('startingBalance').value);
+    if (isNaN(startingBalance) || startingBalance < 100) {
+        errors.push('Starting balance must be at least $100');
+    } else if (startingBalance > 10000000) {
+        errors.push('Starting balance cannot exceed $10,000,000');
+    }
+
+    const stopLoss = parseFloat(document.getElementById('stopLoss').value);
+    if (!isNaN(stopLoss) && stopLoss < 0) {
+        errors.push('Stop loss cannot be negative');
+    }
+
+    const takeProfit = parseFloat(document.getElementById('takeProfit').value);
+    if (!isNaN(takeProfit) && takeProfit < 0) {
+        errors.push('Take profit cannot be negative');
+    }
+
+    const spread = parseFloat(document.getElementById('spread').value);
+    if (!isNaN(spread) && (spread < 0 || spread > 100)) {
+        errors.push('Spread must be between 0 and 100 pips');
     }
 
     return errors;
@@ -154,6 +189,48 @@ function showStatus(message, type = 'info') {
     } else if (type === 'success') {
         console.log(message);
     }
+}
+
+/**
+ * Fetch with retry and timeout
+ * @param {string} url - The URL to fetch
+ * @param {Object} options - Fetch options
+ * @param {number} maxRetries - Maximum number of retries (default: 3)
+ * @param {number} timeout - Timeout in ms (default: 300000 = 5 min for long backtests)
+ */
+async function fetchWithRetry(url, options, maxRetries = 3, timeout = 300000) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            lastError = error;
+
+            // Don't retry if aborted by user or if it's a non-retryable error
+            if (error.name === 'AbortError') {
+                throw new Error('Request timed out. The backtest may be taking longer than expected.');
+            }
+
+            // Retry on network errors
+            if (attempt < maxRetries) {
+                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff
+                showStatus(`Connection failed. Retrying in ${delay/1000}s... (attempt ${attempt}/${maxRetries})`, 'info');
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    throw lastError;
 }
 
 async function runBacktest() {
@@ -184,18 +261,24 @@ async function runBacktest() {
             strategy_params: collectStrategyParams()
         };
 
-        // Call API
-        const response = await fetch('/api/backtest/run', {
+        // Call API with retry and timeout
+        const response = await fetchWithRetry('/api/backtest/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(backtest)
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errorText = await response.text();
+            throw new Error(`Server error (${response.status}): ${errorText || response.statusText}`);
         }
 
         const results = await response.json();
+
+        // Check for error in results
+        if (results.status === 'error') {
+            throw new Error(results.message || 'Backtest failed');
+        }
 
         // Display results
         displayResults(results);
