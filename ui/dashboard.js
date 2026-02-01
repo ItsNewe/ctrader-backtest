@@ -1,40 +1,45 @@
 // Global variables
-let currentStrategy = 'ma_crossover';
+let currentStrategy = 'fillup';
 let equityChart = null;
 
 // Strategy configurations with parameters
+// These match the actual C++ engine strategies
 const strategies = {
-    ma_crossover: {
-        name: 'MA Crossover',
-        description: 'Moving Average Crossover Strategy',
+    fillup: {
+        name: 'FillUp Oscillation',
+        description: 'Adaptive Grid Strategy (XAUUSD Optimized)',
         parameters: [
-            { name: 'fastPeriod', label: 'Fast MA Period', type: 'number', value: 10, min: 2, max: 100 },
-            { name: 'slowPeriod', label: 'Slow MA Period', type: 'number', value: 20, min: 2, max: 200 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 13.0, min: 1, max: 50, step: 0.5 },
+            { name: 'base_spacing', label: 'Base Spacing ($)', type: 'number', value: 1.5, min: 0.1, max: 20, step: 0.1 },
+            { name: 'lookback_hours', label: 'Lookback Hours', type: 'number', value: 4.0, min: 1, max: 24, step: 0.5 }
         ]
     },
-    breakout: {
-        name: 'Breakout',
-        description: 'Support/Resistance Breakout',
+    combined: {
+        name: 'Combined Ju',
+        description: 'Rubber Band TP + Velocity Filter (Highest Returns)',
         parameters: [
-            { name: 'lookback', label: 'Lookback Period', type: 'number', value: 20, min: 5, max: 100 },
-            { name: 'breakoutThreshold', label: 'Breakout %', type: 'number', value: 0.5, min: 0.1, max: 5, step: 0.1 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 12.0, min: 1, max: 50, step: 0.5 },
+            { name: 'base_spacing', label: 'Base Spacing ($)', type: 'number', value: 1.0, min: 0.1, max: 20, step: 0.1 },
+            { name: 'tp_multiplier', label: 'TP Multiplier', type: 'number', value: 2.0, min: 0.5, max: 10, step: 0.1 }
         ]
     },
-    scalping: {
-        name: 'Scalping',
-        description: 'Quick Entry/Exit Strategy',
+    fillup_xagusd: {
+        name: 'FillUp (Silver)',
+        description: 'Percentage-based spacing for XAGUSD',
         parameters: [
-            { name: 'rsiPeriod', label: 'RSI Period', type: 'number', value: 14, min: 5, max: 50 },
-            { name: 'rsiOverbought', label: 'Overbought Level', type: 'number', value: 70, min: 50, max: 100 },
-            { name: 'rsiOversold', label: 'Oversold Level', type: 'number', value: 30, min: 0, max: 50 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 19.0, min: 1, max: 50, step: 0.5 },
+            { name: 'base_spacing_pct', label: 'Spacing %', type: 'number', value: 2.0, min: 0.1, max: 10, step: 0.1 },
+            { name: 'lookback_hours', label: 'Lookback Hours', type: 'number', value: 1.0, min: 0.5, max: 24, step: 0.5 }
         ]
     },
-    grid: {
-        name: 'Grid Trading',
-        description: 'Multi-Level Grid Orders',
+    custom: {
+        name: 'Custom Strategy',
+        description: 'Manual parameter configuration',
         parameters: [
-            { name: 'gridLevels', label: 'Grid Levels', type: 'number', value: 5, min: 2, max: 20 },
-            { name: 'gridSpacing', label: 'Grid Spacing %', type: 'number', value: 1, min: 0.1, max: 5, step: 0.1 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 10.0, min: 1, max: 100, step: 0.5 },
+            { name: 'base_spacing', label: 'Base Spacing', type: 'number', value: 1.0, min: 0.01, max: 100, step: 0.1 },
+            { name: 'min_volume', label: 'Min Volume', type: 'number', value: 0.01, min: 0.01, max: 1, step: 0.01 },
+            { name: 'max_volume', label: 'Max Volume', type: 'number', value: 10.0, min: 0.1, max: 100, step: 0.1 }
         ]
     }
 };
@@ -171,6 +176,7 @@ async function runBacktest() {
             start_date: document.getElementById('startDate').value,
             end_date: document.getElementById('endDate').value,
             testing_mode: document.getElementById('testingMode').value,
+            starting_balance: parseFloat(document.getElementById('startingBalance').value) || 10000,
             lot_size: parseFloat(document.getElementById('lotSize').value),
             stop_loss_pips: parseFloat(document.getElementById('stopLoss').value),
             take_profit_pips: parseFloat(document.getElementById('takeProfit').value),
@@ -223,11 +229,13 @@ function displayResults(results) {
     const pnl = results.total_pnl || 0;
     const returnPct = results.return_percent || 0;
 
-    document.getElementById('totalPnL').textContent = formatCurrency(pnl);
-    document.getElementById('totalPnL').parentElement.className = `metric-value ${pnl >= 0 ? 'positive' : 'negative'}`;
+    const pnlEl = document.getElementById('totalPnL');
+    pnlEl.textContent = formatCurrency(pnl);
+    pnlEl.className = `metric-value ${pnl >= 0 ? 'positive' : 'negative'}`;
 
-    document.getElementById('returnPct').textContent = `${returnPct.toFixed(2)}%`;
-    document.getElementById('returnPct').parentElement.className = `metric-value ${returnPct >= 0 ? 'positive' : 'negative'}`;
+    const returnEl = document.getElementById('returnPct');
+    returnEl.textContent = `${returnPct.toFixed(2)}%`;
+    returnEl.className = `metric-value ${returnPct >= 0 ? 'positive' : 'negative'}`;
 
     document.getElementById('winRate').textContent = `${(results.win_rate || 0).toFixed(1)}%`;
     document.getElementById('profitFactor').textContent = (results.profit_factor || 0).toFixed(2);
@@ -359,7 +367,7 @@ function drawEquityCurve(equityCurve) {
     });
 }
 
-function switchTab(tabName) {
+function switchTab(tabName, event) {
     // Hide all tabs
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.remove('active');
@@ -370,7 +378,9 @@ function switchTab(tabName) {
 
     // Show selected tab
     document.getElementById(tabName).classList.add('active');
-    event.target.classList.add('active');
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
 }
 
 function resetForm() {
@@ -424,6 +434,13 @@ function showBrokerStatus(message, type = 'info') {
     const statusEl = document.getElementById('brokerStatusMessage');
     statusEl.textContent = message;
     statusEl.className = `status-message ${type}`;
+}
+
+function showChartStatus(message, type = 'info') {
+    const statusEl = document.getElementById('chartStatusMessage');
+    statusEl.textContent = message;
+    statusEl.className = `status-message ${type}`;
+    statusEl.style.display = 'block';
 }
 
 async function connectBroker() {
@@ -732,7 +749,7 @@ async function fetchPriceHistory() {
     const symbol = symbolSelect.value;
     
     if (!symbol) {
-        showMessage('chartStatusMessage', 'Please select an instrument first', 'error');
+        showChartStatus('Please select an instrument first', 'error');
         return;
     }
     

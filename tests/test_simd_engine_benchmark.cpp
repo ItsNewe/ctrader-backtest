@@ -39,13 +39,13 @@ int main() {
     config.swap_short = 41.2;
     config.swap_mode = 1;
     config.swap_3days = 3;
-    config.start_date = "2025.01.01";
-    config.end_date = "2025.01.15";  // Short test period - 2 weeks
+    config.start_date = "2024.12.31";  // Data starts at 2024.12.31
+    config.end_date = "2025.01.15";  // Short test period - ~2 weeks
     config.tick_data_config = tick_config;
     config.verbose = false;  // Disable verbose output for benchmark
 
     std::cout << "Test Configuration:" << std::endl;
-    std::cout << "  Period: 2025.01.01 - 2025.01.15 (2 weeks)" << std::endl;
+    std::cout << "  Period: 2024.12.31 - 2025.01.15 (~2 weeks)" << std::endl;
     std::cout << "  Initial Balance: $" << config.initial_balance << std::endl;
     std::cout << "  Strategy: FillUpOscillation (ADAPTIVE_SPACING)" << std::endl;
     std::cout << "\n";

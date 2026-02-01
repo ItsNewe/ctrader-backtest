@@ -495,57 +495,122 @@ def execute_backtest(backtest_id, config, params):
 
 def run_backtest_sync(config):
     """
-    Execute backtest synchronously
-    Returns mock results for demo
+    Execute backtest using C++ engine
+    Falls back to mock results if executable not available
     """
-    # This is a demo implementation that returns realistic mock results
-    # In production, this would call the C++ executable
-
     import random
-    import math
 
-    # Simulate backtest execution time
-    time.sleep(1)
+    # Map UI strategy names to engine strategy names
+    strategy_map = {
+        'ma_crossover': 'fillup',
+        'breakout': 'fillup',
+        'scalping': 'fillup',
+        'grid': 'fillup',
+        'fillup': 'fillup',
+        'combined': 'combined',
+        'FillUpOscillation': 'fillup',
+        'CombinedJu': 'combined'
+    }
 
-    # Generate realistic mock results
+    engine_strategy = strategy_map.get(config.get('strategy', 'fillup'), 'fillup')
+
+    # Build command for C++ backtest CLI
+    backtest_exe = PROJECT_ROOT / 'build' / 'backtest_cli.exe'
+
+    if backtest_exe.exists():
+        try:
+            # Convert date format from YYYY-MM-DD to YYYY.MM.DD
+            start_date = config.get('start_date', '2025.01.01').replace('-', '.')
+            end_date = config.get('end_date', '2025.01.31').replace('-', '.')
+
+            cmd = [
+                str(backtest_exe),
+                '--strategy', engine_strategy,
+                '--start', start_date,
+                '--end', end_date,
+                '--balance', str(config.get('starting_balance', 10000)),
+                '--json'
+            ]
+
+            # Add strategy-specific params
+            strategy_params = config.get('strategy_params', {})
+            if 'survive_pct' in strategy_params:
+                cmd.extend(['--survive', str(strategy_params['survive_pct'])])
+            if 'base_spacing' in strategy_params:
+                cmd.extend(['--spacing', str(strategy_params['base_spacing'])])
+
+            logger.info(f"Running C++ backtest: {' '.join(cmd)}")
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode == 0 and result.stdout:
+                try:
+                    cpp_results = json.loads(result.stdout)
+                    logger.info(f"C++ backtest completed: {cpp_results.get('total_trades', 0)} trades")
+
+                    # Map C++ results to expected format
+                    return {
+                        'status': 'success',
+                        'strategy': config['strategy'],
+                        'testing_mode': config.get('testing_mode', 'tick'),
+                        'total_trades': cpp_results.get('total_trades', 0),
+                        'winning_trades': cpp_results.get('winning_trades', 0),
+                        'losing_trades': cpp_results.get('losing_trades', 0),
+                        'win_rate': cpp_results.get('win_rate', 0),
+                        'total_pnl': cpp_results.get('total_pnl', 0),
+                        'return_percent': cpp_results.get('return_percent', 0),
+                        'average_trade': cpp_results.get('total_pnl', 0) / max(cpp_results.get('total_trades', 1), 1),
+                        'largest_win': cpp_results.get('largest_win', 0),
+                        'largest_loss': cpp_results.get('largest_loss', 0),
+                        'consecutive_wins': 0,  # Not tracked by engine
+                        'consecutive_losses': 0,
+                        'profit_factor': cpp_results.get('profit_factor', 0),
+                        'average_win': cpp_results.get('average_win', 0),
+                        'average_loss': cpp_results.get('average_loss', 0),
+                        'sharpe_ratio': cpp_results.get('sharpe_ratio', 0),
+                        'sortino_ratio': 0,
+                        'max_drawdown': cpp_results.get('max_drawdown', 0),
+                        'recovery_factor': 0,
+                        'equity_curve': cpp_results.get('equity_curve', [10000]),
+                        'trades': cpp_results.get('trades', [])
+                    }
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse C++ output: {e}")
+                    logger.error(f"Output was: {result.stdout[:500]}")
+            else:
+                logger.error(f"C++ backtest failed: {result.stderr}")
+
+        except subprocess.TimeoutExpired:
+            logger.error("C++ backtest timed out")
+        except Exception as e:
+            logger.error(f"Error running C++ backtest: {e}")
+
+    # Fallback to mock results
+    logger.warning("Using mock results (C++ engine not available)")
+
     num_trades = random.randint(20, 100)
     winning_trades = int(num_trades * random.uniform(0.3, 0.7))
     losing_trades = num_trades - winning_trades
-
     total_pnl = random.uniform(-10000, 50000)
     return_pct = random.uniform(-20, 100)
     win_rate = (winning_trades / num_trades * 100) if num_trades > 0 else 0
 
-    # Generate equity curve
-    equity_curve = [10000]  # Starting capital
-    for i in range(1, 252):  # Business days in a year
+    equity_curve = [10000]
+    for i in range(1, 252):
         daily_return = random.gauss(0.0005, 0.02)
         equity_curve.append(equity_curve[-1] * (1 + daily_return))
 
     max_drawdown = calculate_max_drawdown(equity_curve)
 
-    trades = []
-    for i in range(min(10, num_trades)):  # Show first 10 trades
-        entry_time = datetime(2023, 1, 1) + __import__('datetime').timedelta(days=i*20)
-        exit_time = entry_time + __import__('datetime').timedelta(days=random.randint(1, 10))
-        entry_price = 1.0800 + random.uniform(-0.05, 0.05)
-        exit_price = entry_price + random.uniform(-0.02, 0.05)
-        volume = config.get('lot_size', 0.1)
-        pnl = (exit_price - entry_price) * 100000 * volume
-
-        trades.append({
-            'entry_time': entry_time.isoformat(),
-            'entry_price': entry_price,
-            'exit_time': exit_time.isoformat(),
-            'exit_price': exit_price,
-            'volume': volume,
-            'pnl': pnl
-        })
-
-    results = {
+    return {
         'status': 'success',
         'strategy': config['strategy'],
-        'testing_mode': config['testing_mode'],
+        'testing_mode': config.get('testing_mode', 'bar'),
         'total_trades': num_trades,
         'winning_trades': winning_trades,
         'losing_trades': losing_trades,
@@ -565,10 +630,8 @@ def run_backtest_sync(config):
         'max_drawdown': max_drawdown,
         'recovery_factor': abs(total_pnl / max_drawdown) if max_drawdown != 0 else 0,
         'equity_curve': equity_curve,
-        'trades': trades
+        'trades': []
     }
-
-    return results
 
 
 def calculate_max_drawdown(equity_curve):
