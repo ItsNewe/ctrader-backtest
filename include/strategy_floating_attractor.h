@@ -271,7 +271,7 @@ private:
         volume_of_open_trades_ = 0.0;
 
         for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
+            if (trade->IsBuy()) {
                 volume_of_open_trades_ += trade->lot_size;
                 lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
                 highest_buy_ = std::max(highest_buy_, trade->entry_price);

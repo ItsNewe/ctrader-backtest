@@ -1,11 +1,25 @@
 /**
  * Cross-Currency Conversion Rates Example
  *
- * This example demonstrates:
+ * STATUS: CONCEPTUAL EXAMPLE - Does not compile with current engine
+ *
+ * This example demonstrates the DESIGN for future cross-currency support.
+ * The classes and methods shown here (BacktestEngine, MTConnector,
+ * GetRequiredConversionPairs, etc.) are placeholders for documentation.
+ *
+ * For working tick-based backtesting, use:
+ *   - TickBasedEngine (include/tick_based_engine.h)
+ *   - FillUpOscillation strategy (include/fill_up_oscillation.h)
+ *   - See tests/test_strategy_minimal.cpp for working example
+ *
+ * This example demonstrates the intended API for:
  * 1. Determining which conversion rates are needed
  * 2. Querying those rates from the broker
  * 3. Updating the engine with current rates
  * 4. Automatic cross-currency conversion in backtesting
+ *
+ * NOTE: The current TickBasedEngine handles single-currency pairs
+ * (XAUUSD, XAGUSD) where account currency matches profit currency.
  */
 
 #include "backtest_engine.h"

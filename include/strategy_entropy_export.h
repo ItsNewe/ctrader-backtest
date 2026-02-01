@@ -248,7 +248,7 @@ private:
         std::unordered_set<long> open_ids;
         for (const Trade* trade : engine.GetOpenPositions()) {
             open_ids.insert(trade->id);
-            if (trade->direction == "BUY") {
+            if (trade->IsBuy()) {
                 volume_of_open_trades_ += trade->lot_size;
                 lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
                 highest_buy_ = std::max(highest_buy_, trade->entry_price);

@@ -1,10 +1,29 @@
 /**
  * GPU Compute Module
  *
- * Cross-platform GPU acceleration using WebGPU (wgpu-native)
- * Supports AMD, NVIDIA, Intel integrated GPUs
+ * STATUS: CPU FALLBACK ONLY - WebGPU integration is not implemented
  *
- * Features:
+ * This module provides the API design for GPU-accelerated operations but
+ * currently runs ALL computations on CPU using multi-threaded execution.
+ * The API is designed for future WebGPU (wgpu-native) integration.
+ *
+ * Current implementation (CPU fallback):
+ * - Multi-threaded grid search using std::thread
+ * - Vectorized indicator calculations (SMA, EMA, RSI, ATR, BB, MACD)
+ * - Monte Carlo simulation with OpenMP (if available)
+ * - Walk-forward optimization (partial)
+ *
+ * For actual GPU acceleration, the following would be needed:
+ * 1. wgpu-native library (https://github.com/gfx-rs/wgpu-native)
+ * 2. WGSL compute shaders for backtest logic
+ * 3. Platform-specific GPU backend (Vulkan/D3D12/Metal)
+ *
+ * Note: For most backtest scenarios, CPU multi-threading is sufficient.
+ * GPU acceleration mainly helps when running 10,000+ parameter combinations.
+ *
+ * Original design goals:
+ * - Cross-platform GPU acceleration using WebGPU (wgpu-native)
+ * - Support for AMD, NVIDIA, Intel integrated GPUs
  * - Parallel backtest execution
  * - Grid search optimization
  * - Vectorized indicator calculations

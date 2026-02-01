@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Global compiler flags for SIMD support (AVX2/FMA)
+if(MSVC)
+    add_compile_options(/arch:AVX2)
+else()
+    add_compile_options(-mavx2 -mfma)
+endif()
+
 # Output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)

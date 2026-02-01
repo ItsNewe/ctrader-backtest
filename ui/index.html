@@ -551,21 +551,21 @@
                 <div class="form-group">
                     <label>Select Strategy</label>
                     <div class="strategy-selector">
-                        <div class="strategy-option selected" data-strategy="ma_crossover">
-                            <div class="strategy-name">MA Crossover</div>
-                            <div class="strategy-desc">Moving Average Crossover</div>
+                        <div class="strategy-option selected" data-strategy="fillup">
+                            <div class="strategy-name">FillUp Oscillation</div>
+                            <div class="strategy-desc">Adaptive Grid (XAUUSD)</div>
                         </div>
-                        <div class="strategy-option" data-strategy="breakout">
-                            <div class="strategy-name">Breakout</div>
-                            <div class="strategy-desc">Support/Resistance Break</div>
+                        <div class="strategy-option" data-strategy="combined">
+                            <div class="strategy-name">Combined Ju</div>
+                            <div class="strategy-desc">Highest Returns Strategy</div>
                         </div>
-                        <div class="strategy-option" data-strategy="scalping">
-                            <div class="strategy-name">Scalping</div>
-                            <div class="strategy-desc">Quick Entry/Exit</div>
+                        <div class="strategy-option" data-strategy="fillup_xagusd">
+                            <div class="strategy-name">FillUp (Silver)</div>
+                            <div class="strategy-desc">XAGUSD Optimized</div>
                         </div>
-                        <div class="strategy-option" data-strategy="grid">
-                            <div class="strategy-name">Grid Trading</div>
-                            <div class="strategy-desc">Multi-Level Orders</div>
+                        <div class="strategy-option" data-strategy="custom">
+                            <div class="strategy-name">Custom</div>
+                            <div class="strategy-desc">Manual Configuration</div>
                         </div>
                     </div>
                 </div>
@@ -656,9 +656,9 @@
 
                 <div id="results" style="display: none;">
                     <div class="tabs">
-                        <button class="tab-btn active" onclick="switchTab('summary')">Summary</button>
-                        <button class="tab-btn" onclick="switchTab('trades')">Trades</button>
-                        <button class="tab-btn" onclick="switchTab('stats')">Statistics</button>
+                        <button class="tab-btn active" onclick="switchTab('summary', event)">Summary</button>
+                        <button class="tab-btn" onclick="switchTab('trades', event)">Trades</button>
+                        <button class="tab-btn" onclick="switchTab('stats', event)">Statistics</button>
                     </div>
 
                     <!-- Summary Tab -->

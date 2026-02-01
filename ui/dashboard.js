@@ -1,40 +1,109 @@
 // Global variables
-let currentStrategy = 'ma_crossover';
+let currentStrategy = 'fillup';
 let equityChart = null;
+let socket = null;
+let useWebSocket = false;
+let currentBacktestId = null;
+
+// WebSocket connection (optional - falls back to HTTP if unavailable)
+function initializeWebSocket() {
+    if (typeof io === 'undefined') {
+        console.log('Socket.IO not available, using HTTP fallback');
+        return;
+    }
+
+    try {
+        socket = io();
+
+        socket.on('connect', () => {
+            console.log('WebSocket connected');
+            useWebSocket = true;
+            showStatus('Real-time updates enabled', 'success');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('WebSocket disconnected');
+            useWebSocket = false;
+        });
+
+        socket.on('backtest_started', (data) => {
+            currentBacktestId = data.backtest_id;
+            showStatus(`Backtest ${data.backtest_id} started...`, 'info');
+        });
+
+        socket.on('backtest_progress', (data) => {
+            updateProgress(data.progress, data.message);
+        });
+
+        socket.on('backtest_complete', (data) => {
+            document.getElementById('loadingSpinner').classList.remove('active');
+            if (data.status === 'success') {
+                displayResults(data.results);
+                document.getElementById('results').style.display = 'block';
+                showStatus('Backtest completed successfully!', 'success');
+            } else {
+                showStatus(`Backtest failed: ${data.error}`, 'error');
+            }
+        });
+
+        socket.on('backtest_error', (data) => {
+            document.getElementById('loadingSpinner').classList.remove('active');
+            showStatus(`Error: ${data.error}`, 'error');
+        });
+
+    } catch (e) {
+        console.log('WebSocket initialization failed:', e);
+    }
+}
+
+function updateProgress(percent, message) {
+    const progressEl = document.getElementById('progressPercent');
+    const progressBar = document.getElementById('progressBar');
+    const progressMessage = document.getElementById('progressMessage');
+
+    if (progressEl) progressEl.textContent = `${percent}%`;
+    if (progressBar) progressBar.style.width = `${percent}%`;
+    if (progressMessage) progressMessage.textContent = message;
+}
 
 // Strategy configurations with parameters
+// These match the actual C++ engine strategies
 const strategies = {
-    ma_crossover: {
-        name: 'MA Crossover',
-        description: 'Moving Average Crossover Strategy',
+    fillup: {
+        name: 'FillUp Oscillation',
+        description: 'Adaptive Grid Strategy (XAUUSD Optimized)',
         parameters: [
-            { name: 'fastPeriod', label: 'Fast MA Period', type: 'number', value: 10, min: 2, max: 100 },
-            { name: 'slowPeriod', label: 'Slow MA Period', type: 'number', value: 20, min: 2, max: 200 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 13.0, min: 1, max: 50, step: 0.5 },
+            { name: 'base_spacing', label: 'Base Spacing ($)', type: 'number', value: 1.5, min: 0.1, max: 20, step: 0.1 },
+            { name: 'lookback_hours', label: 'Lookback Hours', type: 'number', value: 4.0, min: 1, max: 24, step: 0.5 }
         ]
     },
-    breakout: {
-        name: 'Breakout',
-        description: 'Support/Resistance Breakout',
+    combined: {
+        name: 'Combined Ju',
+        description: 'Rubber Band TP + Velocity Filter (Highest Returns)',
         parameters: [
-            { name: 'lookback', label: 'Lookback Period', type: 'number', value: 20, min: 5, max: 100 },
-            { name: 'breakoutThreshold', label: 'Breakout %', type: 'number', value: 0.5, min: 0.1, max: 5, step: 0.1 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 12.0, min: 1, max: 50, step: 0.5 },
+            { name: 'base_spacing', label: 'Base Spacing ($)', type: 'number', value: 1.0, min: 0.1, max: 20, step: 0.1 },
+            { name: 'tp_multiplier', label: 'TP Multiplier', type: 'number', value: 2.0, min: 0.5, max: 10, step: 0.1 }
         ]
     },
-    scalping: {
-        name: 'Scalping',
-        description: 'Quick Entry/Exit Strategy',
+    fillup_xagusd: {
+        name: 'FillUp (Silver)',
+        description: 'Percentage-based spacing for XAGUSD',
         parameters: [
-            { name: 'rsiPeriod', label: 'RSI Period', type: 'number', value: 14, min: 5, max: 50 },
-            { name: 'rsiOverbought', label: 'Overbought Level', type: 'number', value: 70, min: 50, max: 100 },
-            { name: 'rsiOversold', label: 'Oversold Level', type: 'number', value: 30, min: 0, max: 50 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 19.0, min: 1, max: 50, step: 0.5 },
+            { name: 'base_spacing_pct', label: 'Spacing %', type: 'number', value: 2.0, min: 0.1, max: 10, step: 0.1 },
+            { name: 'lookback_hours', label: 'Lookback Hours', type: 'number', value: 1.0, min: 0.5, max: 24, step: 0.5 }
         ]
     },
-    grid: {
-        name: 'Grid Trading',
-        description: 'Multi-Level Grid Orders',
+    custom: {
+        name: 'Custom Strategy',
+        description: 'Manual parameter configuration',
         parameters: [
-            { name: 'gridLevels', label: 'Grid Levels', type: 'number', value: 5, min: 2, max: 20 },
-            { name: 'gridSpacing', label: 'Grid Spacing %', type: 'number', value: 1, min: 0.1, max: 5, step: 0.1 }
+            { name: 'survive_pct', label: 'Survive %', type: 'number', value: 10.0, min: 1, max: 100, step: 0.5 },
+            { name: 'base_spacing', label: 'Base Spacing', type: 'number', value: 1.0, min: 0.01, max: 100, step: 0.1 },
+            { name: 'min_volume', label: 'Min Volume', type: 'number', value: 0.01, min: 0.01, max: 1, step: 0.01 },
+            { name: 'max_volume', label: 'Max Volume', type: 'number', value: 10.0, min: 0.1, max: 100, step: 0.1 }
         ]
     }
 };
@@ -44,6 +113,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeEventListeners();
     setDefaultDates();
     updateStrategyParams();
+    initializeWebSocket();  // Try to connect WebSocket
 });
 
 function initializeEventListeners() {
@@ -125,15 +195,50 @@ function validateForm() {
         errors.push('End date is required');
     }
 
-    if (parseFloat(document.getElementById('lotSize').value) <= 0) {
+    const lotSize = parseFloat(document.getElementById('lotSize').value);
+    if (isNaN(lotSize) || lotSize <= 0) {
         errors.push('Lot size must be greater than 0');
+    } else if (lotSize > 100) {
+        errors.push('Lot size cannot exceed 100');
     }
 
     const startDate = new Date(document.getElementById('startDate').value);
     const endDate = new Date(document.getElementById('endDate').value);
 
-    if (startDate >= endDate) {
+    if (isNaN(startDate.getTime())) {
+        errors.push('Invalid start date format');
+    } else if (isNaN(endDate.getTime())) {
+        errors.push('Invalid end date format');
+    } else if (startDate >= endDate) {
         errors.push('Start date must be before end date');
+    } else {
+        // Check date range isn't too large (> 5 years can be slow)
+        const daysDiff = (endDate - startDate) / (1000 * 60 * 60 * 24);
+        if (daysDiff > 1825) {
+            errors.push('Date range cannot exceed 5 years');
+        }
+    }
+
+    const startingBalance = parseFloat(document.getElementById('startingBalance').value);
+    if (isNaN(startingBalance) || startingBalance < 100) {
+        errors.push('Starting balance must be at least $100');
+    } else if (startingBalance > 10000000) {
+        errors.push('Starting balance cannot exceed $10,000,000');
+    }
+
+    const stopLoss = parseFloat(document.getElementById('stopLoss').value);
+    if (!isNaN(stopLoss) && stopLoss < 0) {
+        errors.push('Stop loss cannot be negative');
+    }
+
+    const takeProfit = parseFloat(document.getElementById('takeProfit').value);
+    if (!isNaN(takeProfit) && takeProfit < 0) {
+        errors.push('Take profit cannot be negative');
+    }
+
+    const spread = parseFloat(document.getElementById('spread').value);
+    if (!isNaN(spread) && (spread < 0 || spread > 100)) {
+        errors.push('Spread must be between 0 and 100 pips');
     }
 
     return errors;
@@ -151,6 +256,48 @@ function showStatus(message, type = 'info') {
     }
 }
 
+/**
+ * Fetch with retry and timeout
+ * @param {string} url - The URL to fetch
+ * @param {Object} options - Fetch options
+ * @param {number} maxRetries - Maximum number of retries (default: 3)
+ * @param {number} timeout - Timeout in ms (default: 300000 = 5 min for long backtests)
+ */
+async function fetchWithRetry(url, options, maxRetries = 3, timeout = 300000) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            lastError = error;
+
+            // Don't retry if aborted by user or if it's a non-retryable error
+            if (error.name === 'AbortError') {
+                throw new Error('Request timed out. The backtest may be taking longer than expected.');
+            }
+
+            // Retry on network errors
+            if (attempt < maxRetries) {
+                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff
+                showStatus(`Connection failed. Retrying in ${delay/1000}s... (attempt ${attempt}/${maxRetries})`, 'info');
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    throw lastError;
+}
+
 async function runBacktest() {
     const errors = validateForm();
 
@@ -163,33 +310,49 @@ async function runBacktest() {
     document.getElementById('loadingSpinner').classList.add('active');
     document.getElementById('results').style.display = 'none';
 
-    try {
-        // Collect form data
-        const backtest = {
-            strategy: currentStrategy,
-            data_file: document.getElementById('dataFile').value,
-            start_date: document.getElementById('startDate').value,
-            end_date: document.getElementById('endDate').value,
-            testing_mode: document.getElementById('testingMode').value,
-            lot_size: parseFloat(document.getElementById('lotSize').value),
-            stop_loss_pips: parseFloat(document.getElementById('stopLoss').value),
-            take_profit_pips: parseFloat(document.getElementById('takeProfit').value),
-            spread_pips: parseFloat(document.getElementById('spread').value),
-            strategy_params: collectStrategyParams()
-        };
+    // Collect form data
+    const backtest = {
+        strategy: currentStrategy,
+        data_file: document.getElementById('dataFile').value,
+        start_date: document.getElementById('startDate').value,
+        end_date: document.getElementById('endDate').value,
+        testing_mode: document.getElementById('testingMode').value,
+        starting_balance: parseFloat(document.getElementById('startingBalance').value) || 10000,
+        lot_size: parseFloat(document.getElementById('lotSize').value),
+        stop_loss_pips: parseFloat(document.getElementById('stopLoss').value),
+        take_profit_pips: parseFloat(document.getElementById('takeProfit').value),
+        spread_pips: parseFloat(document.getElementById('spread').value),
+        strategy_params: collectStrategyParams()
+    };
 
-        // Call API
-        const response = await fetch('/api/backtest/run', {
+    // Use WebSocket if available for real-time progress updates
+    if (useWebSocket && socket && socket.connected) {
+        showStatus('Starting backtest with real-time updates...', 'info');
+        socket.emit('start_backtest', backtest);
+        // Results will come through WebSocket events
+        return;
+    }
+
+    // Fallback to HTTP
+    try {
+        // Call API with retry and timeout
+        const response = await fetchWithRetry('/api/backtest/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(backtest)
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errorText = await response.text();
+            throw new Error(`Server error (${response.status}): ${errorText || response.statusText}`);
         }
 
         const results = await response.json();
+
+        // Check for error in results
+        if (results.status === 'error') {
+            throw new Error(results.message || 'Backtest failed');
+        }
 
         // Display results
         displayResults(results);
@@ -223,11 +386,13 @@ function displayResults(results) {
     const pnl = results.total_pnl || 0;
     const returnPct = results.return_percent || 0;
 
-    document.getElementById('totalPnL').textContent = formatCurrency(pnl);
-    document.getElementById('totalPnL').parentElement.className = `metric-value ${pnl >= 0 ? 'positive' : 'negative'}`;
+    const pnlEl = document.getElementById('totalPnL');
+    pnlEl.textContent = formatCurrency(pnl);
+    pnlEl.className = `metric-value ${pnl >= 0 ? 'positive' : 'negative'}`;
 
-    document.getElementById('returnPct').textContent = `${returnPct.toFixed(2)}%`;
-    document.getElementById('returnPct').parentElement.className = `metric-value ${returnPct >= 0 ? 'positive' : 'negative'}`;
+    const returnEl = document.getElementById('returnPct');
+    returnEl.textContent = `${returnPct.toFixed(2)}%`;
+    returnEl.className = `metric-value ${returnPct >= 0 ? 'positive' : 'negative'}`;
 
     document.getElementById('winRate').textContent = `${(results.win_rate || 0).toFixed(1)}%`;
     document.getElementById('profitFactor').textContent = (results.profit_factor || 0).toFixed(2);
@@ -359,7 +524,7 @@ function drawEquityCurve(equityCurve) {
     });
 }
 
-function switchTab(tabName) {
+function switchTab(tabName, event) {
     // Hide all tabs
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.remove('active');
@@ -370,7 +535,9 @@ function switchTab(tabName) {
 
     // Show selected tab
     document.getElementById(tabName).classList.add('active');
-    event.target.classList.add('active');
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
 }
 
 function resetForm() {
@@ -424,6 +591,13 @@ function showBrokerStatus(message, type = 'info') {
     const statusEl = document.getElementById('brokerStatusMessage');
     statusEl.textContent = message;
     statusEl.className = `status-message ${type}`;
+}
+
+function showChartStatus(message, type = 'info') {
+    const statusEl = document.getElementById('chartStatusMessage');
+    statusEl.textContent = message;
+    statusEl.className = `status-message ${type}`;
+    statusEl.style.display = 'block';
 }
 
 async function connectBroker() {
@@ -732,7 +906,7 @@ async function fetchPriceHistory() {
     const symbol = symbolSelect.value;
     
     if (!symbol) {
-        showMessage('chartStatusMessage', 'Please select an instrument first', 'error');
+        showChartStatus('Please select an instrument first', 'error');
         return;
     }
     

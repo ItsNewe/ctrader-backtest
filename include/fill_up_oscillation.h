@@ -1,3 +1,40 @@
+/**
+ * @file fill_up_oscillation.h
+ * @brief Oscillation-optimized grid trading strategy for precious metals.
+ *
+ * This strategy implements an enhanced grid trading approach optimized for
+ * oscillating markets like XAUUSD and XAGUSD. Key features include:
+ *
+ * - **Adaptive spacing**: Automatically adjusts grid spacing based on volatility
+ * - **Anti-fragile scaling**: Increases position size during drawdowns
+ * - **Velocity filter**: Pauses trading during market crashes
+ * - **Trend adaptation**: Tightens spacing during strong trends
+ *
+ * @section fuo_usage Basic Usage
+ * @code
+ * // Using config struct (recommended)
+ * auto config = FillUpOscillation::Config::XAUUSD_Default();
+ * config.survive_pct = 15.0;  // Customize if needed
+ * FillUpOscillation strategy(config);
+ *
+ * // Run with engine
+ * engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
+ *     strategy.OnTick(tick, eng);
+ * });
+ * @endcode
+ *
+ * @section fuo_modes Enhancement Modes
+ * | Mode | Description |
+ * |------|-------------|
+ * | BASELINE | No enhancements (control) |
+ * | ADAPTIVE_SPACING | Adjust spacing to volatility (recommended) |
+ * | ANTIFRAGILE | Increase size in drawdown |
+ * | VELOCITY_FILTER | Pause on crash velocity |
+ * | ALL_COMBINED | All enhancements active |
+ *
+ * @see TickBasedEngine, StrategyCombinedJu
+ */
+
 #ifndef FILL_UP_OSCILLATION_H
 #define FILL_UP_OSCILLATION_H
 
@@ -11,12 +48,19 @@
 namespace backtest {
 
 /**
- * Oscillation-Optimized Fill-Up Strategy
+ * @brief Oscillation-optimized grid trading strategy.
  *
- * Enhances grid trading by:
- * 1. Adaptive spacing based on recent volatility
- * 2. Anti-fragile scaling (increase size during drawdowns)
- * 3. Velocity filter (pause on crashes, not slow drawdowns)
+ * Enhances basic grid trading with:
+ * 1. **Adaptive spacing** based on recent volatility
+ * 2. **Anti-fragile scaling** - increases position size during drawdowns
+ * 3. **Velocity filter** - pauses on crashes, not slow drawdowns
+ * 4. **Trend adaptation** - tighter spacing in strong trends
+ *
+ * @section fuo_presets Recommended Settings
+ * | Symbol | survive_pct | base_spacing | lookback | Mode |
+ * |--------|-------------|--------------|----------|------|
+ * | XAUUSD | 13% | $1.50 | 4h | ADAPTIVE_SPACING |
+ * | XAGUSD | 19% | 2.0% | 1h | ADAPTIVE_SPACING + pct_spacing |
  */
 class FillUpOscillation {
 public:
@@ -62,6 +106,84 @@ public:
               margin_level_floor(0) {}        // Disabled
     };
 
+    /**
+     * Unified configuration struct for FillUpOscillation strategy.
+     * Replaces 11+ constructor parameters with a single config object.
+     *
+     * Example usage:
+     *   FillUpOscillation::Config config;
+     *   config.survive_pct = 13.0;
+     *   config.base_spacing = 1.5;
+     *   config.mode = FillUpOscillation::ADAPTIVE_SPACING;
+     *   FillUpOscillation strategy(config);
+     */
+    struct Config {
+        // Core parameters (required)
+        double survive_pct = 13.0;          ///< Survive percentage for lot sizing
+        double base_spacing = 1.5;          ///< Base grid spacing in price units
+        double min_volume = 0.01;           ///< Minimum lot size
+        double max_volume = 10.0;           ///< Maximum lot size
+        double contract_size = 100.0;       ///< Contract size (XAUUSD=100, XAGUSD=5000)
+        double leverage = 500.0;            ///< Account leverage
+
+        // Enhancement mode
+        Mode mode = ADAPTIVE_SPACING;       ///< Strategy enhancement mode
+
+        // Mode-specific parameters
+        double antifragile_scale = 0.1;     ///< Antifragile scaling (10% more per 5% DD)
+        double velocity_threshold = 30.0;   ///< Crash velocity threshold ($/hour)
+        double volatility_lookback_hours = 4.0;  ///< Volatility measurement window
+
+        // Nested configurations
+        AdaptiveConfig adaptive;            ///< Adaptive spacing configuration
+        SafetyConfig safety;                ///< Safety feature configuration
+
+        // Preset configurations
+        static Config XAUUSD_Default() {
+            Config c;
+            c.survive_pct = 13.0;
+            c.base_spacing = 1.5;
+            c.contract_size = 100.0;
+            c.leverage = 500.0;
+            c.mode = ADAPTIVE_SPACING;
+            c.volatility_lookback_hours = 4.0;
+            c.adaptive.typical_vol_pct = 0.55;
+            return c;
+        }
+
+        static Config XAGUSD_Default() {
+            Config c;
+            c.survive_pct = 19.0;
+            c.base_spacing = 2.0;  // Percentage mode
+            c.contract_size = 5000.0;
+            c.leverage = 500.0;
+            c.mode = ADAPTIVE_SPACING;
+            c.volatility_lookback_hours = 1.0;
+            c.adaptive.pct_spacing = true;  // Enable percentage spacing
+            c.adaptive.typical_vol_pct = 0.45;
+            return c;
+        }
+
+        static Config Aggressive() {
+            Config c = XAUUSD_Default();
+            c.survive_pct = 8.0;
+            c.base_spacing = 1.0;
+            c.mode = ALL_COMBINED;
+            c.antifragile_scale = 0.2;
+            return c;
+        }
+
+        static Config Conservative() {
+            Config c = XAUUSD_Default();
+            c.survive_pct = 20.0;
+            c.base_spacing = 2.5;
+            c.mode = ADAPTIVE_SPACING;
+            c.safety.max_positions = 50;
+            c.safety.margin_level_floor = 150.0;
+            return c;
+        }
+    };
+
     // Statistics tracking
     struct Stats {
         long forced_entries = 0;           // Entries forced at min_volume
@@ -70,6 +192,24 @@ public:
         int peak_positions = 0;            // Maximum positions reached
     };
 
+    /**
+     * Config-based constructor (recommended).
+     * Use presets like Config::XAUUSD_Default() or customize the config.
+     */
+    explicit FillUpOscillation(const Config& config)
+        : FillUpOscillation(
+              config.survive_pct, config.base_spacing,
+              config.min_volume, config.max_volume,
+              config.contract_size, config.leverage,
+              config.mode, config.antifragile_scale,
+              config.velocity_threshold, config.volatility_lookback_hours,
+              config.adaptive, config.safety)
+    {}
+
+    /**
+     * Legacy constructor with positional parameters.
+     * @deprecated Use Config-based constructor instead.
+     */
     FillUpOscillation(double survive_pct, double base_spacing,
                       double min_volume, double max_volume,
                       double contract_size, double leverage,

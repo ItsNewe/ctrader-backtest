@@ -110,7 +110,7 @@ int main() {
             std::cout << "\nFirst 5 Trades:" << std::endl;
             for (size_t i = 0; i < std::min(trades.size(), (size_t)5); i++) {
                 const auto& trade = trades[i];
-                std::cout << "#" << (i + 1) << ": " << trade.direction << " "
+                std::cout << "#" << (i + 1) << ": " << trade.GetDirectionStr() << " "
                           << trade.lot_size << " lots @ " << trade.entry_price
                           << " -> " << trade.exit_price << " | P/L: $"
                           << trade.profit_loss << std::endl;
@@ -121,7 +121,7 @@ int main() {
                 size_t start = trades.size() - 5;
                 for (size_t i = start; i < trades.size(); i++) {
                     const auto& trade = trades[i];
-                    std::cout << "#" << (i + 1) << ": " << trade.direction << " "
+                    std::cout << "#" << (i + 1) << ": " << trade.GetDirectionStr() << " "
                               << trade.lot_size << " lots @ " << trade.entry_price
                               << " -> " << trade.exit_price << " | P/L: $"
                               << trade.profit_loss << std::endl;

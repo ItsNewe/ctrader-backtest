@@ -1,11 +1,25 @@
 /**
  * Currency Conversion & Trading Limits Example
  *
- * This example demonstrates:
+ * STATUS: CONCEPTUAL EXAMPLE - Does not compile with current engine
+ *
+ * This example demonstrates the DESIGN for future cross-currency support.
+ * The classes and methods shown here (BacktestEngine, MTConnector, etc.)
+ * are placeholders for documentation purposes.
+ *
+ * For working tick-based backtesting, use:
+ *   - TickBasedEngine (include/tick_based_engine.h)
+ *   - FillUpOscillation strategy (include/fill_up_oscillation.h)
+ *   - See tests/test_strategy_minimal.cpp for working example
+ *
+ * This example demonstrates the intended API for:
  * 1. Querying broker-specific parameters
- * 2. Configuring BacktestEngine with cross-currency support
+ * 2. Configuring engine with cross-currency support
  * 3. Automatic currency conversion for margin and profit
  * 4. Trading limits validation (lot size, SL/TP distance)
+ *
+ * NOTE: The current TickBasedEngine handles single-currency pairs
+ * (XAUUSD, XAGUSD) where account currency matches profit currency.
  */
 
 #include "backtest_engine.h"

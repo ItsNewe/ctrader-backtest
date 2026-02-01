@@ -11,9 +11,11 @@
 #include <cmath>
 
 // Include the actual backtest engine headers
-// These would be your C++ engine headers
-// #include "tick_based_engine.h"
-// #include "fill_up_oscillation.h"
+#include "../../include/tick_based_engine.h"
+#include "../../include/fill_up_oscillation.h"
+#include "../../include/strategy_combined_ju.h"
+
+using namespace backtest;
 
 BacktestWorker::BacktestWorker(QObject *parent)
     : QObject(parent)
@@ -390,16 +392,11 @@ SingleBacktestResult BacktestWorker::executeBacktest(const QMap<QString, double>
     result.parameters = params;
     result.valid = false;
 
-    // This is where you would integrate with the actual C++ backtest engine
-    // For now, this is a placeholder that shows the expected interface
-
-    /*
     try {
         // Create tick data config
         TickDataConfig tick_config;
         tick_config.file_path = m_config.tickDataPath.toStdString();
         tick_config.format = TickDataFormat::MT5_CSV;
-        tick_config.load_all_into_memory = true;
 
         // Create backtest config
         TickBacktestConfig config;
@@ -415,6 +412,11 @@ SingleBacktestResult BacktestWorker::executeBacktest(const QMap<QString, double>
         config.start_date = m_config.startDate.toStdString();
         config.end_date = m_config.endDate.toStdString();
         config.tick_data_config = tick_config;
+        config.verbose = false;  // Quiet mode for optimization runs
+
+        // Enable equity curve tracking for metrics calculation
+        config.track_equity_curve = true;
+        config.equity_sample_interval = 1000;
 
         // Create engine
         TickBasedEngine engine(config);
@@ -424,23 +426,46 @@ SingleBacktestResult BacktestWorker::executeBacktest(const QMap<QString, double>
         double spacing = params.value("base_spacing", 1.5);
         double lookback = params.value("lookback_hours", 4.0);
 
-        FillUpOscillation strategy(survive, spacing, 0.01, 10.0,
-                                   m_config.contractSize, m_config.leverage,
-                                   FillUpOscillation::ADAPTIVE_SPACING,
-                                   0.1, 30.0, lookback);
+        // Check for strategy type parameter
+        QString strategyType = "fillup";  // default
+        if (m_config.parameters.contains("strategy_type")) {
+            // Strategy type could be encoded as: 0=fillup, 1=combined
+            int stratType = static_cast<int>(m_config.parameters.value("strategy_type", 0));
+            strategyType = (stratType == 1) ? "combined" : "fillup";
+        }
 
-        // Run backtest
-        engine.Run([&strategy](const Tick& tick, TickBasedEngine& engine) {
-            strategy.OnTick(tick, engine);
-        });
+        if (strategyType == "combined") {
+            // Use CombinedJu strategy
+            StrategyCombinedJu::Config ju_config;
+            ju_config.survive_pct = survive;
+            ju_config.base_spacing = spacing;
+            ju_config.min_volume = 0.01;
+            ju_config.max_volume = 10.0;
+            ju_config.contract_size = m_config.contractSize;
+            ju_config.leverage = m_config.leverage;
+
+            StrategyCombinedJu strategy(ju_config);
+
+            engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
+                strategy.OnTick(tick, eng);
+            });
+        } else {
+            // Use FillUpOscillation strategy (default)
+            FillUpOscillation strategy(survive, spacing, 0.01, 10.0,
+                                       m_config.contractSize, m_config.leverage,
+                                       FillUpOscillation::ADAPTIVE_SPACING,
+                                       0.1, 30.0, lookback);
+
+            engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
+                strategy.OnTick(tick, eng);
+            });
+        }
 
         // Get results
         auto engineResults = engine.GetResults();
 
         result.finalBalance = engineResults.final_balance;
         result.netProfit = engineResults.final_balance - m_config.initialBalance;
-        result.grossProfit = engineResults.gross_profit;
-        result.grossLoss = engineResults.gross_loss;
         result.profitFactor = engineResults.profit_factor;
         result.maxDrawdown = engineResults.max_drawdown;
         result.maxDrawdownPct = engineResults.max_drawdown_pct;
@@ -448,7 +473,7 @@ SingleBacktestResult BacktestWorker::executeBacktest(const QMap<QString, double>
         result.sortinoRatio = engineResults.sortino_ratio;
         result.calmarRatio = result.maxDrawdownPct > 0 ?
                             (result.netProfit / m_config.initialBalance * 100.0) / result.maxDrawdownPct : 0;
-        result.totalTrades = engineResults.total_trades;
+        result.totalTrades = static_cast<int>(engineResults.total_trades);
         result.winRate = engineResults.win_rate;
         result.valid = true;
 
@@ -456,22 +481,6 @@ SingleBacktestResult BacktestWorker::executeBacktest(const QMap<QString, double>
         emit error(QString("Backtest error: %1").arg(e.what()));
         result.valid = false;
     }
-    */
-
-    // Placeholder: simulate a result for testing the GUI
-    // Remove this and uncomment the actual engine integration above
-    result.finalBalance = m_config.initialBalance * (1.0 + (rand() % 1000) / 100.0);
-    result.netProfit = result.finalBalance - m_config.initialBalance;
-    result.profitFactor = 1.0 + (rand() % 300) / 100.0;
-    result.maxDrawdown = m_config.initialBalance * (rand() % 80) / 100.0;
-    result.maxDrawdownPct = result.maxDrawdown / m_config.initialBalance * 100.0;
-    result.sharpeRatio = (rand() % 500) / 100.0;
-    result.sortinoRatio = result.sharpeRatio * 1.2;
-    result.calmarRatio = result.maxDrawdownPct > 0 ?
-                         (result.netProfit / m_config.initialBalance * 100.0) / result.maxDrawdownPct : 0;
-    result.totalTrades = 100 + rand() % 10000;
-    result.winRate = 50.0 + (rand() % 50);
-    result.valid = true;
 
     return result;
 }
