@@ -5,6 +5,11 @@
  * Usage: backtest_cli.exe --config config.json
  * Or:    backtest_cli.exe --symbol XAUUSD --start 2025.01.01 --end 2025.01.15 --strategy fillup
  *
+ * Environment Variables:
+ *   BACKTEST_DATA_DIR   - Directory containing tick data files (default: ./data)
+ *   BACKTEST_XAUUSD     - Path to XAUUSD tick data file
+ *   BACKTEST_XAGUSD     - Path to XAGUSD tick data file
+ *
  * Build: g++ -O3 -fno-inline -mavx2 -mfma -std=c++17 -static -I include src/backtest_cli.cpp -o build/backtest_cli.exe
  */
 
@@ -17,8 +22,79 @@
 #include <string>
 #include <map>
 #include <cstring>
+#include <cstdlib>
+#include <filesystem>
 
 using namespace backtest;
+namespace fs = std::filesystem;
+
+/**
+ * Get environment variable with fallback
+ */
+std::string GetEnvVar(const std::string& name, const std::string& default_value = "") {
+    const char* value = std::getenv(name.c_str());
+    return value ? std::string(value) : default_value;
+}
+
+/**
+ * Find tick data file using multiple search strategies:
+ * 1. Explicit path from environment variable (e.g., BACKTEST_XAUUSD)
+ * 2. BACKTEST_DATA_DIR + symbol + standard suffixes
+ * 3. Common relative paths (./data, ../data, ./validation)
+ * 4. User's home directory + standard locations
+ */
+std::string FindTickDataFile(const std::string& symbol) {
+    // 1. Check symbol-specific environment variable
+    std::string env_name = "BACKTEST_" + symbol;
+    std::string env_path = GetEnvVar(env_name);
+    if (!env_path.empty() && fs::exists(env_path)) {
+        return env_path;
+    }
+
+    // 2. Check BACKTEST_DATA_DIR + symbol
+    std::string data_dir = GetEnvVar("BACKTEST_DATA_DIR");
+    if (!data_dir.empty()) {
+        std::vector<std::string> suffixes = {"_TICKS_2025.csv", "_TESTER_TICKS.csv", "_TICKS.csv", ".csv"};
+        for (const auto& suffix : suffixes) {
+            std::string path = data_dir + "/" + symbol + suffix;
+            if (fs::exists(path)) return path;
+        }
+    }
+
+    // 3. Check common relative directories
+    std::vector<std::string> search_dirs = {
+        "data", "validation", "validation/Grid", "../data", "../validation",
+        "tick_data", "ticks", "../tick_data"
+    };
+    std::vector<std::string> suffixes = {"_TICKS_2025.csv", "_TESTER_TICKS.csv", "_TICKS.csv", ".csv"};
+
+    for (const auto& dir : search_dirs) {
+        for (const auto& suffix : suffixes) {
+            std::string path = dir + "/" + symbol + suffix;
+            if (fs::exists(path)) return path;
+        }
+    }
+
+    // 4. Check user home directory
+    std::string home = GetEnvVar("HOME", GetEnvVar("USERPROFILE"));
+    if (!home.empty()) {
+        std::vector<std::string> home_dirs = {
+            home + "/Documents/ctrader-backtest/validation/Grid",
+            home + "/Documents/backtest/data",
+            home + "/backtest/data",
+            home + "/tick_data"
+        };
+        for (const auto& dir : home_dirs) {
+            for (const auto& suffix : suffixes) {
+                std::string path = dir + "/" + symbol + suffix;
+                if (fs::exists(path)) return path;
+            }
+        }
+    }
+
+    // Return empty string if not found
+    return "";
+}
 
 // Simple JSON output helper
 class JsonOutput {
@@ -56,12 +132,22 @@ void print_usage() {
     std::cerr << "  --end DATE            End date (YYYY.MM.DD, default: 2025.01.31)\n";
     std::cerr << "  --balance AMOUNT      Initial balance (default: 10000)\n";
     std::cerr << "  --strategy NAME       Strategy: fillup, combined (default: fillup)\n";
-    std::cerr << "  --data PATH           Tick data file path\n";
+    std::cerr << "  --data PATH           Tick data file path (auto-detected if not set)\n";
     std::cerr << "  --survive PCT         Survive percentage for FillUp (default: 13.0)\n";
     std::cerr << "  --spacing AMOUNT      Base spacing for FillUp (default: 1.5)\n";
     std::cerr << "  --json                Output results as JSON (default)\n";
     std::cerr << "  --verbose             Verbose output during backtest\n";
     std::cerr << "  --help                Show this help\n";
+    std::cerr << "\nEnvironment Variables:\n";
+    std::cerr << "  BACKTEST_DATA_DIR     Base directory for tick data files\n";
+    std::cerr << "  BACKTEST_XAUUSD       Full path to XAUUSD tick data file\n";
+    std::cerr << "  BACKTEST_XAGUSD       Full path to XAGUSD tick data file\n";
+    std::cerr << "\nData Search Order:\n";
+    std::cerr << "  1. --data command line argument\n";
+    std::cerr << "  2. BACKTEST_<SYMBOL> environment variable\n";
+    std::cerr << "  3. BACKTEST_DATA_DIR/<SYMBOL>_*.csv\n";
+    std::cerr << "  4. ./data, ./validation, ../data directories\n";
+    std::cerr << "  5. ~/Documents/ctrader-backtest/validation/Grid/\n";
 }
 
 struct Config {
@@ -116,18 +202,19 @@ Config parse_args(int argc, char* argv[]) {
         }
     }
 
-    // Default data path based on symbol
+    // Auto-detect data path if not specified
     if (config.data_path.empty()) {
-        if (config.symbol == "XAUUSD") {
-            config.data_path = "C:/Users/user/Documents/ctrader-backtest/validation/Grid/XAUUSD_TICKS_2025.csv";
-        } else if (config.symbol == "XAGUSD") {
-            config.data_path = "C:/Users/user/Documents/ctrader-backtest/validation/Grid/XAGUSD_TESTER_TICKS.csv";
-            config.contract_size = 5000.0;
-            config.pip_size = 0.001;
-            config.swap_long = -15.0;
-            config.swap_short = 13.72;
-        }
+        config.data_path = FindTickDataFile(config.symbol);
     }
+
+    // Apply symbol-specific broker settings
+    if (config.symbol == "XAGUSD") {
+        config.contract_size = 5000.0;
+        config.pip_size = 0.001;
+        config.swap_long = -15.0;
+        config.swap_short = 13.72;
+    }
+    // XAUUSD defaults are already set in struct
 
     return config;
 }
@@ -135,8 +222,33 @@ Config parse_args(int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
     Config cfg = parse_args(argc, argv);
 
-    if (!cfg.json_output) {
+    // Validate data path was found
+    if (cfg.data_path.empty()) {
+        JsonOutput json;
+        json.begin_object();
+        json.key("status"); json.value("error");
+        json.key("message"); json.value(std::string("Could not find tick data file for symbol: ") + cfg.symbol +
+            ". Set BACKTEST_DATA_DIR or BACKTEST_" + cfg.symbol + " environment variable, " +
+            "or use --data PATH option.");
+        json.end_object();
+        std::cout << json.str() << std::endl;
+        return 1;
+    }
+
+    // Verify file exists
+    if (!fs::exists(cfg.data_path)) {
+        JsonOutput json;
+        json.begin_object();
+        json.key("status"); json.value("error");
+        json.key("message"); json.value(std::string("Tick data file not found: ") + cfg.data_path);
+        json.end_object();
+        std::cout << json.str() << std::endl;
+        return 1;
+    }
+
+    if (!cfg.json_output || cfg.verbose) {
         std::cerr << "Running backtest: " << cfg.symbol << " " << cfg.start_date << " - " << cfg.end_date << std::endl;
+        std::cerr << "Data file: " << cfg.data_path << std::endl;
     }
 
     // Configure tick data
@@ -169,18 +281,19 @@ int main(int argc, char* argv[]) {
 
         // Run with appropriate strategy
         if (cfg.strategy == "fillup" || cfg.strategy == "FillUpOscillation") {
-            FillUpOscillation strategy(
-                cfg.survive_pct,
-                cfg.base_spacing,
-                0.01,   // min_volume
-                10.0,   // max_volume
-                cfg.contract_size,
-                cfg.leverage,
-                FillUpOscillation::ADAPTIVE_SPACING,
-                0.1,    // antifragile_scale
-                30.0,   // max_spacing_mult
-                4.0     // lookback_hours
-            );
+            FillUpOscillation::Config fillup_config;
+            fillup_config.survive_pct = cfg.survive_pct;
+            fillup_config.base_spacing = cfg.base_spacing;
+            fillup_config.min_volume = 0.01;
+            fillup_config.max_volume = 10.0;
+            fillup_config.contract_size = cfg.contract_size;
+            fillup_config.leverage = cfg.leverage;
+            fillup_config.mode = FillUpOscillation::ADAPTIVE_SPACING;
+            fillup_config.antifragile_scale = 0.1;
+            fillup_config.adaptive.max_spacing_mult = 30.0;
+            fillup_config.volatility_lookback_hours = 4.0;
+
+            FillUpOscillation strategy(fillup_config);
 
             engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
                 strategy.OnTick(tick, eng);

@@ -1,5 +1,9 @@
 # Strategy Backtesting Framework (Minimal)
 
+> **Note**: This is a BACKTESTING framework. Live trading components (ctrader_connector.h,
+> metatrader_connector.h, live_trading_bridge.h) are incomplete stubs. For live trading,
+> use the MQL5 EAs in `/mt5/` directly in MetaTrader 5.
+
 ## Build Template
 
 ```cpp

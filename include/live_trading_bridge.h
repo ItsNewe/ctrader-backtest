@@ -2,16 +2,30 @@
 #define LIVE_TRADING_BRIDGE_H
 
 /**
- * Live Trading Bridge
+ * @file live_trading_bridge.h
+ * @brief Abstract interface for unified backtest/live trading
  *
- * Enables running the same strategy code in backtest and live trading.
- * The holy grail: no MQL5 translation, no behavior differences.
+ * STATUS: CONCEPTUAL ONLY - The live trading implementations are NOT complete.
  *
- * Architecture:
- *   Strategy -> IMarketInterface -> [BacktestMarket | MT5Market | CTraderMarket]
+ * This file provides:
+ * - IMarketInterface: Abstract interface for market operations
+ * - BacktestMarket: Working implementation for backtesting
+ * - MT5Market/CTraderMarket: STUB implementations (not functional)
  *
- * The strategy interacts with IMarketInterface, which abstracts away
- * whether ticks come from historical data or a live broker connection.
+ * @warning The MT5Market and CTraderMarket classes are placeholders.
+ * For live trading, use the MQL5 Expert Advisors in the /mt5/ folder.
+ *
+ * The vision was to enable the same strategy code for backtest and live,
+ * but implementing proper broker connectivity requires:
+ * - Platform-specific socket code
+ * - TLS encryption
+ * - Broker-specific API protocols
+ * - Order routing and execution handling
+ *
+ * Current recommendation:
+ * 1. Develop and validate strategies using TickBasedEngine (backtesting)
+ * 2. Translate to MQL5 for live MT5 trading (see /mt5/*.mq5 files)
+ * 3. Or use cTrader Automate for cTrader live trading
  */
 
 #include "tick_data.h"

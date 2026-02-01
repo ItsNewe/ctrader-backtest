@@ -102,7 +102,7 @@ int main() {
             for (size_t i = 0; i < std::min(trades.size(), (size_t)10); i++) {
                 const auto& trade = trades[i];
                 std::cout << "Trade #" << (i + 1) << ": "
-                          << trade.direction << " "
+                          << trade.GetDirectionStr() << " "
                           << trade.lot_size << " lots @ "
                           << trade.entry_price << " -> "
                           << trade.exit_price << " ("
@@ -116,7 +116,7 @@ int main() {
                 for (size_t i = start; i < trades.size(); i++) {
                     const auto& trade = trades[i];
                     std::cout << "Trade #" << (i + 1) << ": "
-                              << trade.direction << " "
+                              << trade.GetDirectionStr() << " "
                               << trade.lot_size << " lots @ "
                               << trade.entry_price << " -> "
                               << trade.exit_price << " ("

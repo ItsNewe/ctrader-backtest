@@ -3,6 +3,32 @@
 #ifndef METATRADER_CONNECTOR_H
 #define METATRADER_CONNECTOR_H
 
+/**
+ * @file metatrader_connector.h
+ * @brief MetaTrader connectivity interfaces
+ *
+ * STATUS: INCOMPLETE - This file contains interface definitions but the
+ * actual live trading implementation is NOT functional.
+ *
+ * The structures and enums here are used for:
+ * - Parsing exported tick data from MT5 for backtesting
+ * - Validating backtest results against MT5 Strategy Tester
+ * - Defining compatible data formats
+ *
+ * For LIVE TRADING:
+ * - Use MT5's built-in MQL5 language and Strategy Tester
+ * - Export your strategy to MQL5 using the generated EA files in /mt5/
+ * - The MQL5 EAs (e.g., FillUpAdaptive_v4.mq5, CombinedJu_EA.mq5) are
+ *   the production-ready implementations
+ *
+ * For BACKTESTING:
+ * - Use TickBasedEngine with exported MT5 tick data (MT5_CSV format)
+ * - Export tick data from MT5: View -> Symbols -> Properties -> Ticks
+ * - The C++ backtester produces MT5-compatible results
+ *
+ * @warning Do NOT use this file for live trading with real money.
+ */
+
 #include "backtest_engine.h"
 #include <map>
 #include <set>
@@ -14,11 +40,11 @@
 // ============================================================================
 // MetaTrader Broker Connectivity & History Data Feed
 // ============================================================================
-// Interfaces with reverse-engineered MT4/MT5 protocol for:
-// - Historical OHLC data retrieval
-// - Tick data feeds
-// - Order management
-// - Account information
+// Interfaces with MT4/MT5 for:
+// - Historical OHLC data parsing
+// - Tick data format compatibility
+// - MT5-compatible result validation
+// NOTE: Live order execution is NOT implemented - use MQL5 EAs instead
 // ============================================================================
 
 namespace mt {

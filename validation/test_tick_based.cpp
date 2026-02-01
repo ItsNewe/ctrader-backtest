@@ -135,7 +135,7 @@ int main() {
         for (size_t i = 0; i < trades.size(); i++) {
             const auto& trade = trades[i];
             std::cout << "\nTrade #" << (i + 1) << ":" << std::endl;
-            std::cout << "  Direction:   " << trade.direction << std::endl;
+            std::cout << "  Direction:   " << trade.GetDirectionStr() << std::endl;
             std::cout << "  Entry Time:  " << trade.entry_time << std::endl;
             std::cout << "  Entry Price: " << trade.entry_price << std::endl;
             std::cout << "  Exit Time:   " << trade.exit_time << std::endl;

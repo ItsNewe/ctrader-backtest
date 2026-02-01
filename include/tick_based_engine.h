@@ -1,192 +1,298 @@
+/**
+ * @file tick_based_engine.h
+ * @brief High-performance tick-based backtesting engine for trading strategies.
+ *
+ * This file provides the core backtesting engine that simulates trade execution
+ * at the tick level, matching MetaTrader 5's "Every tick based on real ticks" mode.
+ *
+ * @section features Key Features
+ * - Tick-by-tick execution with realistic bid/ask spread handling
+ * - SIMD-optimized P/L calculations (AVX2)
+ * - Multiple order types: Market, Limit, Stop, Stop-Limit
+ * - Trailing stops with configurable activation thresholds
+ * - Commission and swap (rollover) simulation
+ * - Slippage models: Fixed, Volume-based, Volatility-based
+ * - Full MT5 compatibility for strategy validation
+ *
+ * @section usage Basic Usage
+ * @code
+ * TickBacktestConfig config = TickBacktestConfig::XAUUSD_Grid_Preset();
+ * config.start_date = "2025.01.01";
+ * config.end_date = "2025.03.31";
+ *
+ * TickBasedEngine engine(config);
+ * MyStrategy strategy;
+ *
+ * engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
+ *     strategy.OnTick(tick, eng);
+ * });
+ *
+ * auto results = engine.GetResults();
+ * @endcode
+ *
+ * @author ctrader-backtest project
+ * @version 2.0
+ * @date 2025
+ */
+
 #ifndef TICK_BASED_ENGINE_H
 #define TICK_BASED_ENGINE_H
 
 #include "tick_data.h"
 #include "tick_data_manager.h"
+#include "trade_types.h"
 #include "position_validator.h"
 #include "currency_converter.h"
 #include "currency_rate_manager.h"
 #include "simd_intrinsics.h"
+#include "backtest_log.h"
+#include "risk_manager.h"
 #include <vector>
 #include <memory>
 #include <functional>
 #include <iostream>
 #include <cstring>
 #include <iomanip>
+#include <cstdlib>
+#include <stdexcept>
 
 namespace backtest {
 
 /**
- * Trade direction enum - replaces string comparison for 10x+ speedup
+ * Symbol specification structure (matches MT5 symbol properties)
  */
-enum class TradeDirection : uint8_t {
-    BUY = 0,
-    SELL = 1
-};
-
-// Helper to convert enum to string for output
-inline const char* TradeDirectionStr(TradeDirection dir) {
-    return dir == TradeDirection::BUY ? "BUY" : "SELL";
-}
-
-/**
- * Pending order types (limit and stop orders)
- */
-enum class PendingOrderType : uint8_t {
-    BUY_LIMIT = 0,   // Buy at price below current (waiting for dip)
-    BUY_STOP = 1,    // Buy at price above current (breakout)
-    SELL_LIMIT = 2,  // Sell at price above current (waiting for spike)
-    SELL_STOP = 3    // Sell at price below current (breakdown)
-};
-
-inline const char* PendingOrderTypeStr(PendingOrderType type) {
-    switch (type) {
-        case PendingOrderType::BUY_LIMIT: return "BUY_LIMIT";
-        case PendingOrderType::BUY_STOP: return "BUY_STOP";
-        case PendingOrderType::SELL_LIMIT: return "SELL_LIMIT";
-        case PendingOrderType::SELL_STOP: return "SELL_STOP";
-        default: return "UNKNOWN";
-    }
-}
-
-/**
- * Pending order structure for limit/stop orders
- */
-struct PendingOrder {
-    int id;
-    std::string symbol;
-    PendingOrderType type;
-    double trigger_price;      // Price at which order activates
-    double lot_size;
-    double stop_loss;
-    double take_profit;
-    std::string created_time;
-    std::string expiry_time;   // Optional: order expiration (empty = GTC)
-
-    PendingOrder() : id(0), type(PendingOrderType::BUY_LIMIT),
-                     trigger_price(0), lot_size(0), stop_loss(0), take_profit(0) {}
-
-    bool IsBuyOrder() const {
-        return type == PendingOrderType::BUY_LIMIT || type == PendingOrderType::BUY_STOP;
-    }
-    bool IsSellOrder() const {
-        return type == PendingOrderType::SELL_LIMIT || type == PendingOrderType::SELL_STOP;
-    }
-    bool IsLimitOrder() const {
-        return type == PendingOrderType::BUY_LIMIT || type == PendingOrderType::SELL_LIMIT;
-    }
-    bool IsStopOrder() const {
-        return type == PendingOrderType::BUY_STOP || type == PendingOrderType::SELL_STOP;
-    }
+struct SymbolSpec {
+    std::string name = "";
+    std::string description = "";
+    double contract_size = 100000.0;
+    int digits = 5;                   // Price decimal places
+    double volume_min = 0.01;         // Minimum lot size
+    double volume_max = 100.0;        // Maximum lot size
+    double volume_step = 0.01;        // Lot size increment
+    double pip_size = 0.00001;        // Pip value
+    int stops_level = 0;              // Minimum SL/TP distance in points
+    FillingType filling_type = FillingType::FOK;
 };
 
 /**
- * Simple trade structure for tick-based engine
+ * Backtest configuration with comprehensive settings
  */
-struct Trade {
-    int id;
-    std::string symbol;
-    TradeDirection direction;  // Enum instead of string - single byte comparison
-    double entry_price;
-    std::string entry_time;
-    double exit_price;
-    std::string exit_time;
-    double lot_size;
-    double stop_loss;
-    double take_profit;
-    double profit_loss;
-    double commission;
-    std::string exit_reason;
-
-    // Trailing stop support
-    double trailing_stop_distance = 0.0;  // Distance in price units (0 = disabled)
-    double trailing_stop_activation = 0.0; // Profit in price units before trailing activates (0 = immediate)
-    double highest_profit_price = 0.0;    // Tracks best price for trailing (buy: highest bid, sell: lowest ask)
-    bool trailing_activated = false;       // Whether trailing stop is currently active
-
-    Trade() : id(0), direction(TradeDirection::BUY), entry_price(0), exit_price(0), lot_size(0),
-              stop_loss(0), take_profit(0), profit_loss(0), commission(0),
-              trailing_stop_distance(0), trailing_stop_activation(0), highest_profit_price(0),
-              trailing_activated(false) {}
-
-    // Helper for backward compatibility - returns direction as string
-    const char* GetDirectionStr() const { return TradeDirectionStr(direction); }
-
-    // Check direction helpers for cleaner code
-    bool IsBuy() const { return direction == TradeDirection::BUY; }
-    bool IsSell() const { return direction == TradeDirection::SELL; }
-
-    // Check if this trade has trailing stop enabled
-    bool HasTrailingStop() const { return trailing_stop_distance > 0; }
-};
-
-/**
- * Configuration for tick-based backtesting
- */
-/**
- * Slippage model types for realistic execution simulation
- */
-enum class SlippageModel : uint8_t {
-    FIXED = 0,           // Fixed slippage in pips (classic model)
-    VOLUME_BASED = 1,    // Slippage increases with position size
-    VOLATILITY_BASED = 2 // Slippage increases during high volatility
-};
-
 struct TickBacktestConfig {
+    // === Basic Settings ===
     std::string symbol = "EURUSD";
     double initial_balance = 10000.0;
     std::string account_currency = "USD";
-    double commission_per_lot = 0.0;
-    double slippage_pips = 0.0;
-    bool use_bid_ask_spread = true;  // Use real bid/ask from ticks
-    double contract_size = 100000.0;  // Contract size (100 for XAUUSD, 100000 for Forex)
-    double leverage = 500.0;          // Leverage (1:500 for XAUUSD)
-    double margin_rate = 1.0;         // Initial margin rate
-    double pip_size = 0.00001;        // Pip size (0.00001 for 5-digit pairs, 0.001 for JPY, 0.01 for XAUUSD)
-    double stop_out_level = 20.0;     // Margin level % below which stop-out occurs (MT5 default: 20%)
 
-    // Advanced slippage model
+    // === Account Mode ===
+    AccountMode account_mode = AccountMode::HEDGING;  // Hedging or netting
+
+    // === Commission Settings ===
+    // NOTE: These are placeholder values. Query actual values from MT5 using
+    // SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE) etc. before backtesting.
+    CommissionMode commission_mode = CommissionMode::PER_LOT;
+    double commission_per_lot = 0.0;        // Query from broker - varies by symbol
+    double commission_percent = 0.0;        // For PERCENT_OF_VOLUME mode
+    double commission_per_deal = 0.0;       // For PER_DEAL mode
+
+    // === Slippage Settings ===
+    // NOTE: Slippage varies by broker, time of day, and liquidity.
+    // Use 0 for backtesting, or measure from real trading data.
+    double slippage_pips = 0.0;             // Query from broker or measure
+    bool use_bid_ask_spread = true;         // Use real bid/ask from ticks
     SlippageModel slippage_model = SlippageModel::FIXED;
-    double slippage_volume_factor = 0.1;   // For VOLUME_BASED: extra pips per lot
-    double slippage_volatility_factor = 1.0; // For VOLATILITY_BASED: multiplier based on recent price movement
+    double slippage_volume_factor = 0.1;    // For VOLUME_BASED: extra pips per lot
+    double slippage_volatility_factor = 1.0; // For VOLATILITY_BASED: multiplier
 
-    // Equity curve tracking
-    bool track_equity_curve = true;        // Enable equity curve recording
-    int equity_sample_interval = 1000;      // Sample equity every N ticks (reduces memory for long backtests)
+    // === Symbol Specifications ===
+    double contract_size = 100000.0;        // Contract size (100 for XAUUSD, 100000 for Forex)
+    double leverage = 500.0;                // Leverage (1:500 for XAUUSD)
+    double margin_rate = 1.0;               // Initial margin rate
+    double pip_size = 0.00001;              // Pip size (0.00001 for 5-digit, 0.01 for XAUUSD)
+    int digits = 5;                         // Price decimal places
+    double volume_min = 0.01;               // Minimum lot size
+    double volume_max = 100.0;              // Maximum lot size
+    double volume_step = 0.01;              // Lot size increment
+    int stops_level = 0;                    // Minimum SL/TP distance in points
 
-    // Date filtering (MT5 behavior: start_date inclusive, end_date exclusive)
-    std::string start_date = "";      // Format: YYYY.MM.DD (empty = no filter)
-    std::string end_date = "";        // Format: YYYY.MM.DD (empty = no filter)
+    // === Risk Settings ===
+    double stop_out_level = 20.0;           // Margin level % for stop-out (MT5 default: 20%)
+    double margin_call_level = 100.0;       // Margin call level %
 
-    // Swap/Rollover fees
-    double swap_long = 0.0;           // Swap for long positions (per lot per day)
-    double swap_short = 0.0;          // Swap for short positions (per lot per day)
-    int swap_mode = 2;                // 2 = SYMBOL_SWAP_MODE_CURRENCY_SYMBOL (in account currency)
-    int swap_3days = 3;               // Day of week for triple swap (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)
-    bool swap_divide_by_price = false; // For pairs where quote currency != account currency (e.g., USDJPY with USD account)
+    // === Equity Tracking ===
+    bool track_equity_curve = true;
+    int equity_sample_interval = 1000;      ///< Sample equity every N ticks
+    size_t max_equity_samples = 100000;     ///< Max equity samples (0 = unlimited, ~800KB at 8 bytes each)
 
-    // Market session settings
-    // For Gold (XAUUSD): trades Mon-Fri only (trading_days = 0b0111110 = 62)
-    // For Crypto: trades 7 days (trading_days = 0b1111111 = 127)
-    int trading_days = 62;            // Bitmask: bit 0=Sun, bit 1=Mon, ... bit 6=Sat (default: Mon-Fri)
-    int market_close_hour = 23;       // Hour when market closes (server time)
-    int market_open_hour = 0;         // Hour when market opens (server time)
+    // === Date Filtering ===
+    std::string start_date = "";            // Format: YYYY.MM.DD (empty = no filter)
+    std::string end_date = "";              // Format: YYYY.MM.DD (empty = no filter)
 
-    // Tick data source
+    // === Swap/Rollover Settings ===
+    double swap_long = 0.0;                 // Swap for long positions
+    double swap_short = 0.0;                // Swap for short positions
+    SwapMode swap_mode_enum = SwapMode::CURRENCY_SYMBOL;
+    int swap_mode = 2;                      // Legacy: 2 = CURRENCY_SYMBOL
+    int swap_3days = 3;                     // Triple swap day (3=Wednesday)
+    bool swap_divide_by_price = false;
+
+    // === Market Session ===
+    int trading_days = 62;                  // Bitmask: Mon-Fri (0b0111110)
+    int market_close_hour = 23;
+    int market_open_hour = 0;
+
+    // === Tick Data Source ===
     TickDataConfig tick_data_config;
 
-    // Output control
-    bool verbose = true;              // Print trade open/close messages
+    // === Output Control ===
+    bool verbose = true;
+
+    // === Validation ===
+    /**
+     * Validate configuration and throw if invalid
+     * @throws std::invalid_argument if configuration is invalid
+     */
+    void Validate() const {
+        if (initial_balance <= 0) {
+            throw std::invalid_argument("initial_balance must be > 0");
+        }
+        if (leverage <= 0) {
+            throw std::invalid_argument("leverage must be > 0");
+        }
+        if (contract_size <= 0) {
+            throw std::invalid_argument("contract_size must be > 0");
+        }
+        if (pip_size <= 0) {
+            throw std::invalid_argument("pip_size must be > 0");
+        }
+        if (stop_out_level < 0 || stop_out_level > 100) {
+            throw std::invalid_argument("stop_out_level must be 0-100");
+        }
+        if (volume_min <= 0) {
+            throw std::invalid_argument("volume_min must be > 0");
+        }
+        if (volume_max < volume_min) {
+            throw std::invalid_argument("volume_max cannot be less than volume_min");
+        }
+        if (volume_step <= 0) {
+            throw std::invalid_argument("volume_step must be > 0");
+        }
+        if (commission_per_lot < 0) {
+            throw std::invalid_argument("commission_per_lot cannot be negative");
+        }
+        if (slippage_pips < 0) {
+            throw std::invalid_argument("slippage_pips cannot be negative");
+        }
+    }
 
     TickBacktestConfig() = default;
 };
 
+// ============ Broker Preset Configurations ============
+
 /**
- * Tick-based backtest engine for high-precision strategy testing
- * Processes every tick for exact order execution
+ * Get preset configuration for XAUUSD on 
+ */
+inline TickBacktestConfig XAUUSD_Grid_Preset() {
+    TickBacktestConfig config;
+    config.symbol = "XAUUSD";
+    config.contract_size = 100.0;
+    config.leverage = 500.0;
+    config.pip_size = 0.01;
+    config.digits = 2;
+    config.swap_long = -66.99;
+    config.swap_short = 41.2;
+    config.swap_mode = 2;
+    config.swap_3days = 3;
+    config.commission_per_lot = 0.0;  // Spread only
+    config.slippage_pips = 0.5;
+    config.volume_min = 0.01;
+    config.volume_max = 100.0;
+    config.volume_step = 0.01;
+    return config;
+}
+
+/**
+ * Get preset configuration for XAGUSD on 
+ */
+inline TickBacktestConfig XAGUSD_Grid_Preset() {
+    TickBacktestConfig config;
+    config.symbol = "XAGUSD";
+    config.contract_size = 5000.0;
+    config.leverage = 500.0;
+    config.pip_size = 0.001;
+    config.digits = 3;
+    config.swap_long = -15.0;
+    config.swap_short = 13.72;
+    config.swap_mode = 2;
+    config.swap_3days = 3;
+    config.commission_per_lot = 0.0;
+    config.slippage_pips = 0.5;
+    config.volume_min = 0.01;
+    config.volume_max = 100.0;
+    config.volume_step = 0.01;
+    return config;
+}
+
+/**
+ * Get preset configuration for standard Forex pair
+ */
+inline TickBacktestConfig ForexPair_Preset(const std::string& symbol = "EURUSD") {
+    TickBacktestConfig config;
+    config.symbol = symbol;
+    config.contract_size = 100000.0;
+    config.leverage = 500.0;
+    config.pip_size = symbol.find("JPY") != std::string::npos ? 0.001 : 0.00001;
+    config.digits = symbol.find("JPY") != std::string::npos ? 3 : 5;
+    config.swap_long = 0.0;  // Varies by broker
+    config.swap_short = 0.0;
+    config.swap_mode = 2;
+    config.swap_3days = 3;
+    config.commission_per_lot = 7.0;  // Typical ECN commission
+    config.slippage_pips = 0.3;
+    config.volume_min = 0.01;
+    config.volume_max = 100.0;
+    config.volume_step = 0.01;
+    return config;
+}
+
+/**
+ * @brief High-precision tick-based backtesting engine.
+ *
+ * Processes every tick for exact order execution, matching MetaTrader 5's
+ * "Every tick based on real ticks" mode. Supports:
+ * - Market orders with realistic slippage
+ * - Pending orders (Limit, Stop, Stop-Limit)
+ * - Trailing stops with activation thresholds
+ * - Stop-loss and take-profit execution
+ * - Swap/rollover fee calculation
+ * - Margin stop-out simulation
+ *
+ * @section engine_usage Usage Example
+ * @code
+ * TickBacktestConfig config = XAUUSD_Grid_Preset();
+ * config.initial_balance = 10000.0;
+ * config.start_date = "2025.01.01";
+ * config.end_date = "2025.12.31";
+ *
+ * TickBasedEngine engine(config);
+ * FillUpOscillation strategy(FillUpOscillation::Config::XAUUSD_Default());
+ *
+ * engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
+ *     strategy.OnTick(tick, eng);
+ * });
+ *
+ * auto results = engine.GetResults();
+ * std::cout << "Final balance: $" << results.final_balance << std::endl;
+ * @endcode
+ *
+ * @see TickBacktestConfig, Trade, BacktestResult
  */
 class TickBasedEngine {
 public:
+    /**
+     * @brief Construct engine with configuration.
+     * @param config Backtesting configuration (broker settings, dates, etc.)
+     */
     explicit TickBasedEngine(const TickBacktestConfig& config)
         : config_(config),
           balance_(config.initial_balance),
@@ -200,8 +306,15 @@ public:
         simd::init();
     }
 
-    // Strategy callback signature
-    // Called for each tick with current tick data
+    /**
+     * @brief Strategy callback signature.
+     *
+     * Called for each tick during backtest. Strategy should analyze the tick
+     * and call engine trading methods (OpenMarketOrder, ClosePosition, etc.)
+     *
+     * @param tick Current tick data (bid, ask, timestamp)
+     * @param engine Reference to engine for trading operations
+     */
     using StrategyCallback = std::function<void(const Tick& tick, TickBasedEngine& engine)>;
 
     // Run backtest with strategy
@@ -296,10 +409,29 @@ public:
         }
     }
 
-    // Trading operations
+    /// @name Trading Operations
+    /// @{
 
     /**
-     * Open market order at current tick price
+     * @brief Open a market order at current tick price.
+     *
+     * BUY orders execute at ask price, SELL orders at bid price.
+     * Slippage is applied based on the configured slippage model.
+     *
+     * @param direction TradeDirection::BUY or TradeDirection::SELL
+     * @param lot_size Position size in lots (e.g., 0.01 = micro lot)
+     * @param stop_loss Stop-loss price (0 = no SL)
+     * @param take_profit Take-profit price (0 = no TP)
+     * @return Pointer to created Trade, or nullptr if order failed
+     *
+     * @code
+     * // Open 0.01 lot BUY with $10 SL and $20 TP
+     * Trade* trade = engine.OpenMarketOrder(
+     *     TradeDirection::BUY, 0.01,
+     *     engine.GetCurrentTick().bid - 10.0,  // SL
+     *     engine.GetCurrentTick().ask + 20.0   // TP
+     * );
+     * @endcode
      */
     Trade* OpenMarketOrder(TradeDirection direction, double lot_size,
                            double stop_loss = 0.0, double take_profit = 0.0) {
@@ -465,8 +597,8 @@ public:
                       << " | Reason: " << reason << std::endl;
         }
 
-        // Free memory - trade was allocated with new in CreateTrade
-        delete trade;
+        // Return trade to pool for reuse instead of delete
+        trade_pool_.Release(trade);
 
         return true;
     }
@@ -662,6 +794,9 @@ private:
     size_t next_trade_id_ = 1;
     size_t next_pending_order_id_ = 1;
 
+    // Trade memory pool for reduced allocation overhead
+    TradePool trade_pool_;
+
     // Pre-allocated vectors for UpdateEquity (pool allocator pattern)
     mutable std::vector<double> pnl_buffer_buy_;
     mutable std::vector<double> pnl_buffer_sell_;
@@ -704,6 +839,9 @@ private:
     mutable std::vector<double> sell_lot_sizes_;
     mutable std::vector<Trade*> buy_positions_;
     mutable std::vector<Trade*> sell_positions_;
+    // Pre-allocated price buffers for margin calculation (avoid per-tick allocation)
+    mutable std::vector<double> buy_prices_buffer_;
+    mutable std::vector<double> sell_prices_buffer_;
 
     // Refresh SIMD cache when positions have changed
     void RefreshSimdCache() const {
@@ -743,7 +881,8 @@ private:
 
     Trade* CreateTrade(TradeDirection direction, double entry_price,
                        double lot_size, double sl, double tp) {
-        Trade* trade = new Trade();
+        // Use trade pool instead of new/delete for better performance
+        Trade* trade = trade_pool_.Allocate();
         trade->id = next_trade_id_++;
         trade->symbol = config_.symbol;
         trade->direction = direction;
@@ -878,27 +1017,40 @@ private:
         if (config_.track_equity_curve) {
             equity_sample_counter_++;
             if (equity_sample_counter_ >= static_cast<size_t>(config_.equity_sample_interval)) {
-                equity_curve_.push_back(equity_);
-                equity_timestamps_.push_back(tick.timestamp);
+                // Respect max_equity_samples limit (0 = unlimited)
+                if (config_.max_equity_samples == 0 || equity_curve_.size() < config_.max_equity_samples) {
+                    equity_curve_.push_back(equity_);
+                    equity_timestamps_.push_back(tick.timestamp);
+                }
                 equity_sample_counter_ = 0;
             }
         }
 
         // Track daily returns for Sharpe ratio calculation
+        // Optimized: compare first 10 chars directly without substr() allocation
         if (tick.timestamp.size() >= 10) {
-            std::string current_date = tick.timestamp.substr(0, 10);  // YYYY.MM.DD
-            if (current_date != last_daily_date_ && !last_daily_date_.empty()) {
+            // Compare date portion directly: YYYY.MM.DD (10 chars)
+            bool date_changed = last_daily_date_.empty() ||
+                (tick.timestamp.compare(0, 10, last_daily_date_, 0, 10) != 0);
+
+            if (date_changed && !last_daily_date_.empty()) {
                 // New day - calculate daily return
                 if (last_daily_equity_ > 0) {
                     double daily_return = (equity_ - last_daily_equity_) / last_daily_equity_;
-                    daily_returns_.push_back(daily_return);
+                    // Cap at ~10 years of daily data (2500 trading days)
+                    if (daily_returns_.size() < 2500) {
+                        daily_returns_.push_back(daily_return);
+                    }
                 }
                 last_daily_equity_ = equity_;
             }
             if (last_daily_date_.empty()) {
                 last_daily_equity_ = equity_;
             }
-            last_daily_date_ = current_date;
+            // Only allocate when date actually changes (once per day, not per tick)
+            if (date_changed) {
+                last_daily_date_ = tick.timestamp.substr(0, 10);
+            }
         }
 
         // Track recent prices for volatility-based slippage
@@ -932,10 +1084,12 @@ private:
 
             // BUY positions use ask price for margin
             if (!buy_lot_sizes_.empty()) {
-                std::vector<double> buy_prices(buy_lot_sizes_.size(), tick.ask);
+                // Reuse pre-allocated buffer, resize without reallocation if capacity sufficient
+                buy_prices_buffer_.resize(buy_lot_sizes_.size());
+                std::fill(buy_prices_buffer_.begin(), buy_prices_buffer_.end(), tick.ask);
                 used_margin += simd::total_margin_batch_avx2_optimized(
                     buy_lot_sizes_.data(),
-                    buy_prices.data(),
+                    buy_prices_buffer_.data(),
                     buy_lot_sizes_.size(),
                     config_.contract_size,
                     config_.leverage
@@ -944,10 +1098,12 @@ private:
 
             // SELL positions use bid price for margin
             if (!sell_lot_sizes_.empty()) {
-                std::vector<double> sell_prices(sell_lot_sizes_.size(), tick.bid);
+                // Reuse pre-allocated buffer, resize without reallocation if capacity sufficient
+                sell_prices_buffer_.resize(sell_lot_sizes_.size());
+                std::fill(sell_prices_buffer_.begin(), sell_prices_buffer_.end(), tick.bid);
                 used_margin += simd::total_margin_batch_avx2_optimized(
                     sell_lot_sizes_.data(),
-                    sell_prices.data(),
+                    sell_prices_buffer_.data(),
                     sell_lot_sizes_.size(),
                     config_.contract_size,
                     config_.leverage
@@ -997,9 +1153,10 @@ private:
         if (pending_orders_.empty()) return;
 
         std::vector<size_t> orders_to_execute;
+        std::vector<size_t> stop_limits_to_activate;
 
         for (size_t i = 0; i < pending_orders_.size(); ++i) {
-            const PendingOrder& order = pending_orders_[i];
+            PendingOrder& order = pending_orders_[i];
 
             // Check expiry
             if (!order.expiry_time.empty() && tick.timestamp >= order.expiry_time) {
@@ -1025,6 +1182,40 @@ private:
                 case PendingOrderType::SELL_STOP:
                     // SELL_STOP triggers when bid drops to or below trigger price
                     triggered = (tick.bid <= order.trigger_price);
+                    break;
+                case PendingOrderType::BUY_STOP_LIMIT:
+                    // Two-phase: First check stop trigger, then limit execution
+                    if (!order.stop_limit_activated) {
+                        // Phase 1: Stop trigger - activates when ask >= trigger_price
+                        if (tick.ask >= order.trigger_price) {
+                            order.stop_limit_activated = true;
+                            if (config_.verbose) {
+                                std::cout << tick.timestamp << " - STOP_LIMIT ACTIVATED #" << order.id
+                                          << " waiting for limit @ " << order.limit_price << std::endl;
+                            }
+                        }
+                    } else {
+                        // Phase 2: Limit execution - triggers when ask <= limit_price
+                        double limit = order.limit_price > 0 ? order.limit_price : order.trigger_price;
+                        triggered = (tick.ask <= limit);
+                    }
+                    break;
+                case PendingOrderType::SELL_STOP_LIMIT:
+                    // Two-phase: First check stop trigger, then limit execution
+                    if (!order.stop_limit_activated) {
+                        // Phase 1: Stop trigger - activates when bid <= trigger_price
+                        if (tick.bid <= order.trigger_price) {
+                            order.stop_limit_activated = true;
+                            if (config_.verbose) {
+                                std::cout << tick.timestamp << " - STOP_LIMIT ACTIVATED #" << order.id
+                                          << " waiting for limit @ " << order.limit_price << std::endl;
+                            }
+                        }
+                    } else {
+                        // Phase 2: Limit execution - triggers when bid >= limit_price
+                        double limit = order.limit_price > 0 ? order.limit_price : order.trigger_price;
+                        triggered = (tick.bid >= limit);
+                    }
                     break;
             }
 
@@ -1193,12 +1384,12 @@ private:
         // Triple swap: charged at end of swap_3days (e.g., Wednesday) to cover weekend.
         // swap_3days=3 (Wednesday) means 3x swap is applied after Wednesday's last tick.
 
-        std::string current_date = tick.timestamp.substr(0, 10);  // Get "YYYY.MM.DD"
-
+        // Optimized: compare first 10 chars without allocation (hot path!)
         // Detect day change: new date means previous day ended, apply its swap
         bool is_new_day = false;
 
-        if (current_date != last_swap_date_ && !last_swap_date_.empty()) {
+        if (tick.timestamp.size() >= 10 && !last_swap_date_.empty() &&
+            tick.timestamp.compare(0, 10, last_swap_date_, 0, 10) != 0) {
             int prev_day_of_week = GetDayOfWeek(last_swap_date_);
 
             // Check if previous day was a trading day (swap is for overnight hold)
@@ -1222,25 +1413,49 @@ private:
             for (Trade* trade : open_positions_) {
                 double swap_per_lot = trade->IsBuy() ? config_.swap_long : config_.swap_short;
 
-                // Calculate swap based on swap mode
+                // Calculate swap based on swap mode (matches MT5 SYMBOL_SWAP_MODE_*)
                 double position_swap = 0.0;
 
-                if (config_.swap_mode == 1) {
-                    // SYMBOL_SWAP_MODE_POINTS: swap in points, need to convert to currency
-                    // Swap in USD = swap_points × SYMBOL_POINT × contract_size × lot_size
-                    // SYMBOL_POINT = pip_size from config (0.01 for XAUUSD, 0.001 for XAGUSD, etc.)
-                    position_swap = swap_per_lot * config_.pip_size * config_.contract_size * trade->lot_size;
-                    // For pairs where quote currency != account currency (e.g., USDJPY with USD account),
-                    // the point value is in quote currency and needs to be divided by current price
-                    if (config_.swap_divide_by_price && tick.bid > 0) {
-                        position_swap /= tick.bid;
+                switch (config_.swap_mode) {
+                    case 0:  // SYMBOL_SWAP_MODE_DISABLED
+                        // No swap charged
+                        position_swap = 0.0;
+                        break;
+
+                    case 1:  // SYMBOL_SWAP_MODE_POINTS
+                        // Swap in points, converted to currency
+                        // Swap in USD = swap_points × SYMBOL_POINT × contract_size × lot_size
+                        position_swap = swap_per_lot * config_.pip_size * config_.contract_size * trade->lot_size;
+                        // For pairs where quote currency != account currency
+                        if (config_.swap_divide_by_price && tick.bid > 0) {
+                            position_swap /= tick.bid;
+                        }
+                        break;
+
+                    case 2:  // SYMBOL_SWAP_MODE_CURRENCY_SYMBOL (default)
+                        // In account currency per lot
+                        position_swap = swap_per_lot * trade->lot_size;
+                        break;
+
+                    case 3: {  // SYMBOL_SWAP_MODE_INTEREST
+                        // Annual interest rate as percentage
+                        // Daily swap = (lot_size × contract_size × price × annual_rate%) / 365 / 100
+                        double price = trade->IsBuy() ? tick.bid : tick.ask;
+                        double position_value = trade->lot_size * config_.contract_size * price;
+                        position_swap = (position_value * swap_per_lot) / 365.0 / 100.0;
+                        break;
                     }
-                } else if (config_.swap_mode == 2) {
-                    // SYMBOL_SWAP_MODE_CURRENCY_SYMBOL: in account currency per lot
-                    position_swap = swap_per_lot * trade->lot_size;
-                } else {
-                    // Other modes not implemented yet - fallback to mode 2 behavior
-                    position_swap = swap_per_lot * trade->lot_size;
+
+                    case 4:  // SYMBOL_SWAP_MODE_MARGIN_CURRENCY
+                        // In margin currency per lot (similar to mode 2 but may need conversion)
+                        // For simplicity, treating same as mode 2 since we assume account=margin currency
+                        position_swap = swap_per_lot * trade->lot_size;
+                        break;
+
+                    default:
+                        // Unknown mode - fallback to mode 2
+                        position_swap = swap_per_lot * trade->lot_size;
+                        break;
                 }
 
                 // Apply swap multiplier for triple swap day
@@ -1269,7 +1484,11 @@ private:
             }
         }
 
-        last_swap_date_ = current_date;
+        // Only allocate when date changes (once per day, not per tick)
+        if (tick.timestamp.size() >= 10 &&
+            (last_swap_date_.empty() || tick.timestamp.compare(0, 10, last_swap_date_, 0, 10) != 0)) {
+            last_swap_date_ = tick.timestamp.substr(0, 10);
+        }
     }
 };
 
