@@ -982,6 +982,198 @@ public:
 
 ---
 
+---
+
+## 17. Extended Features (mql5_extended.h)
+
+The `include/mql5_extended.h` header provides additional MQL5 features beyond the core compatibility layer.
+
+### Terminal Functions
+```cpp
+// Get terminal information
+long build = TerminalInfoInteger(TERMINAL_BUILD);
+bool connected = TerminalInfoInteger(TERMINAL_CONNECTED);
+int cores = TerminalInfoInteger(TERMINAL_CPU_CORES);
+std::string name = TerminalInfoString(TERMINAL_NAME);
+std::string path = TerminalInfoString(TERMINAL_DATA_PATH);
+```
+
+### Global Variables
+```cpp
+// Set and get global variables (persist across ticks)
+GlobalVariableSet("LastPrice", 2750.50);
+double price = GlobalVariableGet("LastPrice");
+bool exists = GlobalVariableCheck("LastPrice");
+datetime when = GlobalVariableTime("LastPrice");
+GlobalVariableDel("LastPrice");
+
+// Atomic set-on-condition (for synchronization)
+GlobalVariableSetOnCondition("Lock", 1.0, 0.0);  // Set to 1 only if currently 0
+
+// Enumerate all globals
+int total = GlobalVariablesTotal();
+for (int i = 0; i < total; i++) {
+    std::string name = GlobalVariableName(i);
+}
+```
+
+### Event System
+```cpp
+// Timer events
+EventSetTimer(5);        // Fire OnTimer every 5 seconds
+EventSetMillisecondTimer(100);  // Fire every 100ms
+EventKillTimer();
+
+// Custom chart events
+EventChartCustom(0, CHARTEVENT_CUSTOM, 123, 45.67, "data");
+
+// Set event callbacks
+EventManager::Instance().SetOnTimer([]() { /* handle timer */ });
+EventManager::Instance().SetOnTrade([]() { /* handle trade */ });
+EventManager::Instance().SetOnTick([]() { /* handle tick */ });
+```
+
+### File Operations
+```cpp
+// Open file
+int handle = FileOpen("data.csv", FILE_READ | FILE_CSV, ',');
+
+// Read data
+std::string line = FileReadString(handle);
+double value = FileReadDouble(handle);
+int num = FileReadInteger(handle);
+
+// Write data
+FileWriteString(handle, "Hello");
+FileWriteDouble(handle, 123.456, 2);
+
+// File management
+bool exists = FileIsExist("data.csv");
+FileDelete("old.csv");
+FileCopy("src.csv", 0, "dst.csv", 0);
+FileMove("old.csv", 0, "new.csv", 0);
+ulong size = FileSize(handle);
+FileSeek(handle, 0, SEEK_SET);
+
+FileClose(handle);
+```
+
+### History Access
+```cpp
+// Select history period
+HistorySelect(from_time, to_time);
+HistorySelectByPosition(position_id);
+
+// Access deals
+int deals = HistoryDealsTotal();
+for (int i = 0; i < deals; i++) {
+    ulong ticket = HistoryDealGetTicket(i);
+    double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
+    double volume = HistoryDealGetDouble(ticket, DEAL_VOLUME);
+    std::string symbol = HistoryDealGetString(ticket, DEAL_SYMBOL);
+}
+
+// Access orders
+int orders = HistoryOrdersTotal();
+for (int i = 0; i < orders; i++) {
+    ulong ticket = HistoryOrderGetTicket(i);
+    double price = HistoryOrderGetDouble(ticket, ORDER_PRICE_OPEN);
+}
+```
+
+### Chart Functions (Stubs for Backtest)
+```cpp
+// These are stubs - no actual chart in backtest mode
+long chart = ChartOpen("XAUUSD", PERIOD_H1);
+ChartSetInteger(chart, CHART_SHOW_GRID, false);
+ChartSetString(chart, CHART_COMMENT, "Test");
+ChartRedraw(chart);
+ChartClose(chart);
+```
+
+### Object Functions (Stubs for Backtest)
+```cpp
+// These are stubs - no actual objects in backtest mode
+ObjectCreate(0, "line1", OBJ_HLINE, 0, 0, 2750.0);
+ObjectSetDouble(0, "line1", OBJPROP_PRICE, 2751.0);
+ObjectDelete(0, "line1");
+```
+
+### Custom Indicators
+```cpp
+// Create indicator handle
+int ma_handle = iMA("XAUUSD", PERIOD_H1, 14, 0, MODE_SMA, PRICE_CLOSE);
+int rsi_handle = iRSI("XAUUSD", PERIOD_H1, 14, PRICE_CLOSE);
+int bands_handle = iBands("XAUUSD", PERIOD_H1, 20, 0, 2.0, PRICE_CLOSE);
+
+// Copy buffer data
+std::vector<double> buffer;
+CopyBuffer(ma_handle, 0, 0, 100, buffer);
+
+// Release when done
+IndicatorRelease(ma_handle);
+```
+
+### Series Access (Legacy Functions)
+```cpp
+int bars = iBars("XAUUSD", PERIOD_H1);
+int shift = iBarShift("XAUUSD", PERIOD_H1, time);
+datetime t = iTime("XAUUSD", PERIOD_H1, 0);
+double o = iOpen("XAUUSD", PERIOD_H1, 0);
+double h = iHigh("XAUUSD", PERIOD_H1, 0);
+double l = iLow("XAUUSD", PERIOD_H1, 0);
+double c = iClose("XAUUSD", PERIOD_H1, 0);
+```
+
+### Notifications (Logging in Backtest)
+```cpp
+SendNotification("Alert message");  // Logs to console
+SendMail("Subject", "Body");        // Logs to console
+PlaySound("alert.wav");             // Logs to console
+MessageBox("Message", "Title");     // Logs to console, returns IDOK
+```
+
+---
+
+## Implementation Files
+
+| File | Description |
+|------|-------------|
+| `include/mql5_compat.h` | Core MQL5 types, math, string, array, datetime functions, 11 technical indicators |
+| `include/mql5_extended.h` | Terminal, file, global variables, events, history, chart/object stubs, custom indicators |
+| `include/mql5_trade_context.h` | CTrade, CPositionInfo, CSymbolInfo, CAccountInfo classes |
+| `include/mt5_statistics.h` | 60+ statistics and optimization criteria |
+
+### Usage Example
+```cpp
+#include "mql5_compat.h"
+#include "mql5_extended.h"
+#include "mql5_trade_context.h"
+using namespace mql5;
+
+// Now use MQL5-style code
+datetime now = TimeCurrent();
+double price = NormalizeDouble(2750.123, 2);
+
+// Global variables
+GlobalVariableSet("LastTrade", now);
+
+// File operations
+int f = FileOpen("log.txt", FILE_WRITE | FILE_TXT);
+FileWriteString(f, "Started at " + TimeToString(now));
+FileClose(f);
+
+// Timer
+EventSetTimer(60);  // Every minute
+
+// Trading
+CTrade trade;
+trade.SetExpertMagicNumber(12345);
+trade.Buy(0.1, "XAUUSD", 0, 2740.0, 2760.0, "Grid buy");
+```
+
+---
+
 ## Sources
 
 - [MQL5 Function Reference](https://www.mql5.com/en/docs/function_indices)
