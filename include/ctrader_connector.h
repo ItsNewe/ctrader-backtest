@@ -1,6 +1,42 @@
 #ifndef CTRADER_CONNECTOR_H
 #define CTRADER_CONNECTOR_H
 
+/**
+ * cTrader Open API Connector
+ *
+ * STATUS: INCOMPLETE - Socket implementation is a placeholder
+ *
+ * This connector provides the structure for connecting to cTrader Open API
+ * but the actual socket communication is NOT implemented. The cTrader API
+ * uses Protocol Buffers over SSL/TLS sockets, which requires:
+ *
+ * 1. Platform-specific socket code (Winsock on Windows, POSIX on Unix)
+ * 2. OpenSSL for TLS encryption
+ * 3. Protocol Buffers library for message serialization
+ * 4. cTrader Open API protobuf definitions
+ *
+ * For BACKTESTING purposes, use file-based tick data loaders instead:
+ *   - TickBasedEngine with MT5_CSV format (most common)
+ *   - Export tick data from cTrader/cAlgo using built-in export tools
+ *   - Download from third-party providers (Dukascopy, etc.)
+ *
+ * To get tick data from cTrader:
+ *   1. Open cTrader platform
+ *   2. Go to Symbol Information
+ *   3. Export tick history to CSV
+ *   4. Convert to MT5_CSV format if needed
+ *
+ * For LIVE TRADING integration with cTrader:
+ *   - Use cTrader Automate (cAlgo) directly
+ *   - Use the official cTrader Open API with proper protobuf implementation
+ *   - See: https://connect.ctrader.com/documentation
+ *
+ * Implementation requirements for live connection:
+ *   - #define CTRADER_USE_OPENSSL for TLS support
+ *   - Link against: -lssl -lcrypto -lprotobuf
+ *   - Include cTrader protobuf definitions
+ */
+
 #include "backtest_engine.h"
 #include <iostream>
 #include <string>

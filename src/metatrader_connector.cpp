@@ -168,13 +168,30 @@ MTConnection::~MTConnection() {
 
 bool MTConnection::Connect() {
     status_ = MTConnectionStatus::CONNECTING;
-    
-    // TODO: Implement actual socket connection using Boost.Asio or WinSocket
-    // Would establish connection to MT4/MT5 server
-    
-    std::cout << "Connecting to " << config_.broker_name << " (" << config_.server << ":" << config_.port << ")..." << std::endl;
-    
-    // Simulated connection
+
+    /**
+     * NOTE: Live MT4/MT5 connection requires platform-specific socket implementation.
+     *
+     * For BACKTESTING purposes, use the file-based loaders instead:
+     *   - MTHistoryLoader::LoadBarsFromCSV()    - Load OHLC from exported CSV
+     *   - MTHistoryLoader::LoadBarsFromHistory() - Load from MT4/MT5 history folder
+     *   - MTHistoryLoader::LoadTicksFromHST()   - Load ticks from HST files
+     *
+     * For LIVE trading integration, consider these alternatives:
+     *   1. Use ZeroMQ bridge: EA sends data to external app via ZMQ socket
+     *   2. Use MetaTrader WebAPI (MT5 only, requires paid license)
+     *   3. Use shared memory / named pipes for local EA communication
+     *
+     * The MT4/MT5 network protocol is proprietary and undocumented.
+     * Direct socket connection is NOT RECOMMENDED for production use.
+     */
+
+    std::cout << "[MT Connector] Connecting to " << config_.broker_name
+              << " (" << config_.server << ":" << config_.port << ")..." << std::endl;
+    std::cout << "[MT Connector] NOTE: Using simulated connection for backtesting." << std::endl;
+    std::cout << "[MT Connector] For real data, use MTHistoryLoader with exported CSV/HST files." << std::endl;
+
+    // Simulated connection for backtesting workflows
     status_ = MTConnectionStatus::CONNECTED;
     return true;
 }
