@@ -1,6 +1,70 @@
 // Global variables
 let currentStrategy = 'fillup';
 let equityChart = null;
+let socket = null;
+let useWebSocket = false;
+let currentBacktestId = null;
+
+// WebSocket connection (optional - falls back to HTTP if unavailable)
+function initializeWebSocket() {
+    if (typeof io === 'undefined') {
+        console.log('Socket.IO not available, using HTTP fallback');
+        return;
+    }
+
+    try {
+        socket = io();
+
+        socket.on('connect', () => {
+            console.log('WebSocket connected');
+            useWebSocket = true;
+            showStatus('Real-time updates enabled', 'success');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('WebSocket disconnected');
+            useWebSocket = false;
+        });
+
+        socket.on('backtest_started', (data) => {
+            currentBacktestId = data.backtest_id;
+            showStatus(`Backtest ${data.backtest_id} started...`, 'info');
+        });
+
+        socket.on('backtest_progress', (data) => {
+            updateProgress(data.progress, data.message);
+        });
+
+        socket.on('backtest_complete', (data) => {
+            document.getElementById('loadingSpinner').classList.remove('active');
+            if (data.status === 'success') {
+                displayResults(data.results);
+                document.getElementById('results').style.display = 'block';
+                showStatus('Backtest completed successfully!', 'success');
+            } else {
+                showStatus(`Backtest failed: ${data.error}`, 'error');
+            }
+        });
+
+        socket.on('backtest_error', (data) => {
+            document.getElementById('loadingSpinner').classList.remove('active');
+            showStatus(`Error: ${data.error}`, 'error');
+        });
+
+    } catch (e) {
+        console.log('WebSocket initialization failed:', e);
+    }
+}
+
+function updateProgress(percent, message) {
+    const progressEl = document.getElementById('progressPercent');
+    const progressBar = document.getElementById('progressBar');
+    const progressMessage = document.getElementById('progressMessage');
+
+    if (progressEl) progressEl.textContent = `${percent}%`;
+    if (progressBar) progressBar.style.width = `${percent}%`;
+    if (progressMessage) progressMessage.textContent = message;
+}
 
 // Strategy configurations with parameters
 // These match the actual C++ engine strategies
@@ -49,6 +113,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeEventListeners();
     setDefaultDates();
     updateStrategyParams();
+    initializeWebSocket();  // Try to connect WebSocket
 });
 
 function initializeEventListeners() {
@@ -245,22 +310,31 @@ async function runBacktest() {
     document.getElementById('loadingSpinner').classList.add('active');
     document.getElementById('results').style.display = 'none';
 
-    try {
-        // Collect form data
-        const backtest = {
-            strategy: currentStrategy,
-            data_file: document.getElementById('dataFile').value,
-            start_date: document.getElementById('startDate').value,
-            end_date: document.getElementById('endDate').value,
-            testing_mode: document.getElementById('testingMode').value,
-            starting_balance: parseFloat(document.getElementById('startingBalance').value) || 10000,
-            lot_size: parseFloat(document.getElementById('lotSize').value),
-            stop_loss_pips: parseFloat(document.getElementById('stopLoss').value),
-            take_profit_pips: parseFloat(document.getElementById('takeProfit').value),
-            spread_pips: parseFloat(document.getElementById('spread').value),
-            strategy_params: collectStrategyParams()
-        };
+    // Collect form data
+    const backtest = {
+        strategy: currentStrategy,
+        data_file: document.getElementById('dataFile').value,
+        start_date: document.getElementById('startDate').value,
+        end_date: document.getElementById('endDate').value,
+        testing_mode: document.getElementById('testingMode').value,
+        starting_balance: parseFloat(document.getElementById('startingBalance').value) || 10000,
+        lot_size: parseFloat(document.getElementById('lotSize').value),
+        stop_loss_pips: parseFloat(document.getElementById('stopLoss').value),
+        take_profit_pips: parseFloat(document.getElementById('takeProfit').value),
+        spread_pips: parseFloat(document.getElementById('spread').value),
+        strategy_params: collectStrategyParams()
+    };
 
+    // Use WebSocket if available for real-time progress updates
+    if (useWebSocket && socket && socket.connected) {
+        showStatus('Starting backtest with real-time updates...', 'info');
+        socket.emit('start_backtest', backtest);
+        // Results will come through WebSocket events
+        return;
+    }
+
+    // Fallback to HTTP
+    try {
         // Call API with retry and timeout
         const response = await fetchWithRetry('/api/backtest/run', {
             method: 'POST',

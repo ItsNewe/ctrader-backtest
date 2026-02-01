@@ -98,8 +98,16 @@ struct Trade {
     double commission;
     std::string exit_reason;
 
+    // Trailing stop support
+    double trailing_stop_distance = 0.0;  // Distance in price units (0 = disabled)
+    double trailing_stop_activation = 0.0; // Profit in price units before trailing activates (0 = immediate)
+    double highest_profit_price = 0.0;    // Tracks best price for trailing (buy: highest bid, sell: lowest ask)
+    bool trailing_activated = false;       // Whether trailing stop is currently active
+
     Trade() : id(0), direction(TradeDirection::BUY), entry_price(0), exit_price(0), lot_size(0),
-              stop_loss(0), take_profit(0), profit_loss(0), commission(0) {}
+              stop_loss(0), take_profit(0), profit_loss(0), commission(0),
+              trailing_stop_distance(0), trailing_stop_activation(0), highest_profit_price(0),
+              trailing_activated(false) {}
 
     // Helper for backward compatibility - returns direction as string
     const char* GetDirectionStr() const { return TradeDirectionStr(direction); }
@@ -107,11 +115,23 @@ struct Trade {
     // Check direction helpers for cleaner code
     bool IsBuy() const { return direction == TradeDirection::BUY; }
     bool IsSell() const { return direction == TradeDirection::SELL; }
+
+    // Check if this trade has trailing stop enabled
+    bool HasTrailingStop() const { return trailing_stop_distance > 0; }
 };
 
 /**
  * Configuration for tick-based backtesting
  */
+/**
+ * Slippage model types for realistic execution simulation
+ */
+enum class SlippageModel : uint8_t {
+    FIXED = 0,           // Fixed slippage in pips (classic model)
+    VOLUME_BASED = 1,    // Slippage increases with position size
+    VOLATILITY_BASED = 2 // Slippage increases during high volatility
+};
+
 struct TickBacktestConfig {
     std::string symbol = "EURUSD";
     double initial_balance = 10000.0;
@@ -124,6 +144,15 @@ struct TickBacktestConfig {
     double margin_rate = 1.0;         // Initial margin rate
     double pip_size = 0.00001;        // Pip size (0.00001 for 5-digit pairs, 0.001 for JPY, 0.01 for XAUUSD)
     double stop_out_level = 20.0;     // Margin level % below which stop-out occurs (MT5 default: 20%)
+
+    // Advanced slippage model
+    SlippageModel slippage_model = SlippageModel::FIXED;
+    double slippage_volume_factor = 0.1;   // For VOLUME_BASED: extra pips per lot
+    double slippage_volatility_factor = 1.0; // For VOLATILITY_BASED: multiplier based on recent price movement
+
+    // Equity curve tracking
+    bool track_equity_curve = true;        // Enable equity curve recording
+    int equity_sample_interval = 1000;      // Sample equity every N ticks (reduces memory for long backtests)
 
     // Date filtering (MT5 behavior: start_date inclusive, end_date exclusive)
     std::string start_date = "";      // Format: YYYY.MM.DD (empty = no filter)
@@ -279,11 +308,9 @@ public:
             // Use bid for SELL, ask for BUY
             double entry_price = is_buy ? current_tick_.ask : current_tick_.bid;
 
-            // Apply slippage
-            if (config_.slippage_pips > 0) {
-                double slippage = config_.slippage_pips * GetPipValue();
-                entry_price += is_buy ? slippage : -slippage;
-            }
+            // Apply slippage based on configured model
+            double slippage = CalculateSlippage(lot_size);
+            entry_price += is_buy ? slippage : -slippage;
 
             Trade* trade = CreateTrade(direction, entry_price, lot_size, stop_loss, take_profit);
             open_positions_.push_back(trade);
@@ -360,6 +387,42 @@ public:
     const std::vector<PendingOrder>& GetPendingOrders() const { return pending_orders_; }
 
     /**
+     * Set trailing stop on a trade
+     * @param trade The trade to modify
+     * @param distance Distance in price units to trail behind best price
+     * @param activation_profit Profit (in price units) required before trailing activates (0 = immediate)
+     */
+    bool SetTrailingStop(Trade* trade, double distance, double activation_profit = 0.0) {
+        if (!trade) return false;
+
+        trade->trailing_stop_distance = distance;
+        trade->trailing_stop_activation = activation_profit;
+        trade->trailing_activated = (activation_profit <= 0);  // Activate immediately if no activation threshold
+
+        // Initialize highest profit price
+        if (trade->IsBuy()) {
+            trade->highest_profit_price = current_tick_.bid;
+        } else {
+            trade->highest_profit_price = current_tick_.ask;
+        }
+
+        return true;
+    }
+
+    /**
+     * Open market order with trailing stop
+     */
+    Trade* OpenMarketOrderWithTrailing(TradeDirection direction, double lot_size,
+                                        double trailing_distance, double trailing_activation = 0.0,
+                                        double take_profit = 0.0) {
+        Trade* trade = OpenMarketOrder(direction, lot_size, 0.0, take_profit);
+        if (trade) {
+            SetTrailingStop(trade, trailing_distance, trailing_activation);
+        }
+        return trade;
+    }
+
+    /**
      * Close position at current tick price
      */
     bool ClosePosition(Trade* trade, const std::string& reason = "Manual") {
@@ -417,6 +480,10 @@ public:
     size_t GetTotalTrades() const { return closed_trades_.size(); }
     bool IsStopOutOccurred() const { return stop_out_occurred_; }
 
+    // Get equity curve data
+    const std::vector<double>& GetEquityCurve() const { return equity_curve_; }
+    const std::vector<std::string>& GetEquityTimestamps() const { return equity_timestamps_; }
+
     // Results
     struct BacktestResults {
         double initial_balance;
@@ -435,6 +502,16 @@ public:
         double max_drawdown_pct;
         double total_swap_charged;
         bool stop_out_occurred;
+
+        // Risk metrics
+        double sharpe_ratio;           // Annualized Sharpe ratio
+        double sortino_ratio;          // Sortino ratio (downside deviation)
+        double profit_factor;          // Gross profit / Gross loss
+        double recovery_factor;        // Net profit / Max drawdown
+
+        // Equity curve (if tracking enabled)
+        std::vector<double> equity_curve;
+        std::vector<std::string> equity_timestamps;
     };
 
     BacktestResults GetResults() const {
@@ -481,7 +558,74 @@ public:
         results.total_trades_opened = total_trades_opened_;
         results.stop_out_occurred = stop_out_occurred_;
 
+        // Calculate profit factor
+        double gross_profit = total_wins;
+        double gross_loss = std::abs(total_losses);
+        results.profit_factor = gross_loss > 0 ? gross_profit / gross_loss : 0.0;
+
+        // Calculate recovery factor
+        results.recovery_factor = max_drawdown_ > 0 ? results.total_profit_loss / max_drawdown_ : 0.0;
+
+        // Calculate Sharpe ratio from daily returns
+        results.sharpe_ratio = CalculateSharpeRatio();
+        results.sortino_ratio = CalculateSortinoRatio();
+
+        // Include equity curve if tracking was enabled
+        results.equity_curve = equity_curve_;
+        results.equity_timestamps = equity_timestamps_;
+
         return results;
+    }
+
+    // Calculate annualized Sharpe ratio from daily returns
+    double CalculateSharpeRatio() const {
+        if (daily_returns_.size() < 2) return 0.0;
+
+        // Calculate mean daily return
+        double sum = 0.0;
+        for (double r : daily_returns_) sum += r;
+        double mean = sum / daily_returns_.size();
+
+        // Calculate standard deviation
+        double variance = 0.0;
+        for (double r : daily_returns_) {
+            double diff = r - mean;
+            variance += diff * diff;
+        }
+        double stddev = std::sqrt(variance / daily_returns_.size());
+
+        if (stddev < 1e-10) return 0.0;
+
+        // Annualize: multiply by sqrt(252 trading days)
+        return (mean / stddev) * std::sqrt(252.0);
+    }
+
+    // Calculate Sortino ratio (only considers downside deviation)
+    double CalculateSortinoRatio() const {
+        if (daily_returns_.size() < 2) return 0.0;
+
+        // Calculate mean daily return
+        double sum = 0.0;
+        for (double r : daily_returns_) sum += r;
+        double mean = sum / daily_returns_.size();
+
+        // Calculate downside deviation (only negative returns)
+        double downside_sum = 0.0;
+        int negative_count = 0;
+        for (double r : daily_returns_) {
+            if (r < 0) {
+                downside_sum += r * r;
+                negative_count++;
+            }
+        }
+
+        if (negative_count == 0) return 0.0;
+        double downside_dev = std::sqrt(downside_sum / negative_count);
+
+        if (downside_dev < 1e-10) return 0.0;
+
+        // Annualize
+        return (mean / downside_dev) * std::sqrt(252.0);
     }
 
     void PrintResults() const {
@@ -536,6 +680,20 @@ private:
     double peak_equity_ = 0.0;
     double max_drawdown_ = 0.0;
     double max_drawdown_percent_ = 0.0;
+
+    // Equity curve tracking for visualization and Sharpe calculation
+    std::vector<double> equity_curve_;         // Sampled equity values
+    std::vector<std::string> equity_timestamps_; // Corresponding timestamps
+    size_t equity_sample_counter_ = 0;         // Counter for sampling interval
+
+    // Daily returns for Sharpe ratio calculation
+    std::vector<double> daily_returns_;
+    std::string last_daily_date_ = "";
+    double last_daily_equity_ = 0.0;
+
+    // Volatility tracking for variable slippage
+    std::vector<double> recent_prices_;        // Last N prices for volatility calculation
+    static constexpr size_t VOLATILITY_WINDOW = 20;
 
     // SIMD-optimized position cache (updated when positions change)
     // Separates BUY and SELL positions for vectorized operations
@@ -611,6 +769,44 @@ private:
         trade->profit_loss = profit - trade->commission;
     }
 
+    /**
+     * Calculate slippage based on configured model
+     */
+    double CalculateSlippage(double lot_size) const {
+        double base_slippage = config_.slippage_pips * GetPipValue();
+
+        switch (config_.slippage_model) {
+            case SlippageModel::FIXED:
+                return base_slippage;
+
+            case SlippageModel::VOLUME_BASED:
+                // Slippage increases with position size
+                // Extra slippage = volume_factor * lot_size * pip_value
+                return base_slippage + (config_.slippage_volume_factor * lot_size * GetPipValue());
+
+            case SlippageModel::VOLATILITY_BASED:
+                // Slippage increases during high volatility
+                if (recent_prices_.size() >= 2) {
+                    // Calculate recent volatility as average absolute price change
+                    double volatility = 0.0;
+                    for (size_t i = 1; i < recent_prices_.size(); ++i) {
+                        volatility += std::abs(recent_prices_[i] - recent_prices_[i-1]);
+                    }
+                    volatility /= (recent_prices_.size() - 1);
+
+                    // Normal volatility baseline (e.g., 0.10 for XAUUSD)
+                    double normal_volatility = GetPipValue() * 10.0;
+                    double volatility_multiplier = volatility / normal_volatility;
+
+                    return base_slippage * (1.0 + config_.slippage_volatility_factor * (volatility_multiplier - 1.0));
+                }
+                return base_slippage;
+
+            default:
+                return base_slippage;
+        }
+    }
+
     void UpdateEquity(const Tick& tick) {
         equity_ = balance_;
 
@@ -676,6 +872,41 @@ private:
         if (current_drawdown > max_drawdown_) {
             max_drawdown_ = current_drawdown;
             max_drawdown_percent_ = (peak_equity_ > 0) ? (current_drawdown / peak_equity_) * 100.0 : 0.0;
+        }
+
+        // Track equity curve (sampled at intervals to reduce memory)
+        if (config_.track_equity_curve) {
+            equity_sample_counter_++;
+            if (equity_sample_counter_ >= static_cast<size_t>(config_.equity_sample_interval)) {
+                equity_curve_.push_back(equity_);
+                equity_timestamps_.push_back(tick.timestamp);
+                equity_sample_counter_ = 0;
+            }
+        }
+
+        // Track daily returns for Sharpe ratio calculation
+        if (tick.timestamp.size() >= 10) {
+            std::string current_date = tick.timestamp.substr(0, 10);  // YYYY.MM.DD
+            if (current_date != last_daily_date_ && !last_daily_date_.empty()) {
+                // New day - calculate daily return
+                if (last_daily_equity_ > 0) {
+                    double daily_return = (equity_ - last_daily_equity_) / last_daily_equity_;
+                    daily_returns_.push_back(daily_return);
+                }
+                last_daily_equity_ = equity_;
+            }
+            if (last_daily_date_.empty()) {
+                last_daily_equity_ = equity_;
+            }
+            last_daily_date_ = current_date;
+        }
+
+        // Track recent prices for volatility-based slippage
+        if (config_.slippage_model == SlippageModel::VOLATILITY_BASED) {
+            recent_prices_.push_back(tick.bid);
+            if (recent_prices_.size() > VOLATILITY_WINDOW) {
+                recent_prices_.erase(recent_prices_.begin());
+            }
         }
     }
 
@@ -831,40 +1062,85 @@ private:
     }
 
     void ProcessOpenPositions(const Tick& tick) {
-        // Check stop loss and take profit for all open positions
+        // Check stop loss, take profit, and trailing stops for all open positions
         std::vector<Trade*> positions_to_close;
+        std::vector<std::string> close_reasons;
 
         for (Trade* trade : open_positions_) {
+            bool should_close = false;
+            std::string reason;
+
             if (trade->IsBuy()) {
-                // For BUY positions, check bid price against SL/TP
-                if (trade->stop_loss > 0 && tick.bid <= trade->stop_loss) {
-                    positions_to_close.push_back(trade);
-                } else if (trade->take_profit > 0 && tick.bid >= trade->take_profit) {
-                    positions_to_close.push_back(trade);
+                double current_price = tick.bid;
+
+                // Process trailing stop for BUY positions
+                if (trade->HasTrailingStop()) {
+                    // Check if trailing should activate
+                    double profit_pips = current_price - trade->entry_price;
+                    if (!trade->trailing_activated && profit_pips >= trade->trailing_stop_activation) {
+                        trade->trailing_activated = true;
+                        trade->highest_profit_price = current_price;
+                    }
+
+                    // Update trailing stop if activated
+                    if (trade->trailing_activated) {
+                        if (current_price > trade->highest_profit_price) {
+                            trade->highest_profit_price = current_price;
+                            // Move stop loss up
+                            trade->stop_loss = current_price - trade->trailing_stop_distance;
+                        }
+                    }
+                }
+
+                // Check SL/TP
+                if (trade->stop_loss > 0 && current_price <= trade->stop_loss) {
+                    should_close = true;
+                    reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
+                } else if (trade->take_profit > 0 && current_price >= trade->take_profit) {
+                    should_close = true;
+                    reason = "TP";
                 }
             } else { // SELL
-                // For SELL positions, check ask price against SL/TP
-                if (trade->stop_loss > 0 && tick.ask >= trade->stop_loss) {
-                    positions_to_close.push_back(trade);
-                } else if (trade->take_profit > 0 && tick.ask <= trade->take_profit) {
-                    positions_to_close.push_back(trade);
+                double current_price = tick.ask;
+
+                // Process trailing stop for SELL positions
+                if (trade->HasTrailingStop()) {
+                    // Check if trailing should activate (profit = entry - current for SELL)
+                    double profit_pips = trade->entry_price - current_price;
+                    if (!trade->trailing_activated && profit_pips >= trade->trailing_stop_activation) {
+                        trade->trailing_activated = true;
+                        trade->highest_profit_price = current_price;  // Lowest for SELL
+                    }
+
+                    // Update trailing stop if activated
+                    if (trade->trailing_activated) {
+                        if (current_price < trade->highest_profit_price) {
+                            trade->highest_profit_price = current_price;
+                            // Move stop loss down
+                            trade->stop_loss = current_price + trade->trailing_stop_distance;
+                        }
+                    }
                 }
+
+                // Check SL/TP
+                if (trade->stop_loss > 0 && current_price >= trade->stop_loss) {
+                    should_close = true;
+                    reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
+                } else if (trade->take_profit > 0 && current_price <= trade->take_profit) {
+                    should_close = true;
+                    reason = "TP";
+                }
+            }
+
+            if (should_close) {
+                positions_to_close.push_back(trade);
+                close_reasons.push_back(reason);
             }
         }
 
-        // Close positions that hit SL/TP
-        for (Trade* trade : positions_to_close) {
-            std::string reason = "SL";
-            if (trade->IsBuy()) {
-                if (trade->take_profit > 0 && tick.bid >= trade->take_profit) {
-                    reason = "TP";
-                }
-            } else {
-                if (trade->take_profit > 0 && tick.ask <= trade->take_profit) {
-                    reason = "TP";
-                }
-            }
-            ClosePosition(trade, reason);
+        // Close positions that hit SL/TP/Trailing
+        for (size_t i = 0; i < positions_to_close.size(); ++i) {
+            ClosePosition(positions_to_close[i], close_reasons[i]);
         }
     }
 

@@ -1,10 +1,16 @@
 """
 Flask Web Server for cTrader Backtest Engine
-Provides REST API to run backtests from the web UI
+Provides REST API and WebSocket support to run backtests from the web UI
 """
 
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
+try:
+    from flask_socketio import SocketIO, emit
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+    logger_msg = "flask-socketio not installed. WebSocket support disabled. Install with: pip install flask-socketio"
 import json
 import subprocess
 import os
@@ -14,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 import threading
 import time
+import uuid
 
 # Import broker API module
 from broker_api import BrokerAccount, BrokerManager, InstrumentSpec
@@ -25,6 +32,14 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='ui', static_url_path='')
 CORS(app)
+
+# Initialize SocketIO if available
+if WEBSOCKET_AVAILABLE:
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+    logger.info("WebSocket support enabled")
+else:
+    socketio = None
+    logger.warning("WebSocket support disabled (flask-socketio not installed)")
 
 # Configuration
 BACKTEST_EXE = r'build\backtest.exe'
@@ -882,10 +897,100 @@ if __name__ == '__main__':
 
     logger.info(f"Server binding to {server_host}:{server_port}")
 
-    # Run Flask app
-    app.run(
-        host=server_host,
-        port=server_port,
-        debug=False,
-        threaded=True
-    )
+    # Run with WebSocket support if available
+    if WEBSOCKET_AVAILABLE and socketio:
+        logger.info(f"Starting server with WebSocket support on {server_host}:{server_port}")
+        socketio.run(app, host=server_host, port=server_port, debug=False)
+    else:
+        logger.info(f"Starting server (HTTP only) on {server_host}:{server_port}")
+        app.run(host=server_host, port=server_port, debug=False, threaded=True)
+
+
+# ================================================================================
+# WebSocket Event Handlers
+# ================================================================================
+
+if WEBSOCKET_AVAILABLE:
+    # Active WebSocket backtest sessions
+    ws_backtest_sessions = {}
+
+    @socketio.on('connect')
+    def handle_connect():
+        """Handle WebSocket connection"""
+        logger.info(f"WebSocket client connected: {request.sid}")
+        emit('connected', {'status': 'connected', 'sid': request.sid})
+
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        """Handle WebSocket disconnection"""
+        logger.info(f"WebSocket client disconnected: {request.sid}")
+        # Clean up any running backtests for this session
+        if request.sid in ws_backtest_sessions:
+            del ws_backtest_sessions[request.sid]
+
+    @socketio.on('start_backtest')
+    def handle_start_backtest(data):
+        """Start a backtest with real-time progress updates via WebSocket"""
+        try:
+            backtest_id = str(uuid.uuid4())[:8]
+            ws_backtest_sessions[request.sid] = backtest_id
+
+            emit('backtest_started', {'backtest_id': backtest_id, 'status': 'running'})
+
+            # Run backtest in background thread with progress updates
+            def run_with_progress():
+                try:
+                    emit('backtest_progress', {
+                        'backtest_id': backtest_id,
+                        'progress': 0,
+                        'message': 'Initializing backtest...'
+                    })
+
+                    # Simulate progress for demo (real implementation would parse C++ output)
+                    for progress in [10, 25, 50, 75, 90]:
+                        time.sleep(0.5)
+                        socketio.emit('backtest_progress', {
+                            'backtest_id': backtest_id,
+                            'progress': progress,
+                            'message': f'Processing... {progress}%'
+                        }, room=request.sid)
+
+                    # Run actual backtest
+                    results = run_backtest_sync(data)
+
+                    socketio.emit('backtest_complete', {
+                        'backtest_id': backtest_id,
+                        'status': 'success',
+                        'results': results
+                    }, room=request.sid)
+
+                except Exception as e:
+                    logger.error(f"WebSocket backtest error: {e}")
+                    socketio.emit('backtest_error', {
+                        'backtest_id': backtest_id,
+                        'error': str(e)
+                    }, room=request.sid)
+
+            # Start background thread
+            thread = threading.Thread(target=run_with_progress)
+            thread.daemon = True
+            thread.start()
+
+        except Exception as e:
+            logger.error(f"Error starting WebSocket backtest: {e}")
+            emit('backtest_error', {'error': str(e)})
+
+    @socketio.on('cancel_backtest')
+    def handle_cancel_backtest(data):
+        """Cancel a running backtest"""
+        backtest_id = data.get('backtest_id')
+        if request.sid in ws_backtest_sessions:
+            del ws_backtest_sessions[request.sid]
+            emit('backtest_cancelled', {'backtest_id': backtest_id})
+            logger.info(f"Backtest {backtest_id} cancelled")
+
+    @socketio.on('subscribe_equity')
+    def handle_subscribe_equity(data):
+        """Subscribe to real-time equity updates during backtest"""
+        backtest_id = data.get('backtest_id')
+        emit('equity_subscribed', {'backtest_id': backtest_id})
