@@ -95,6 +95,34 @@ Result: 22.11x (2025), 83% DD
 
 ---
 
+## Parallel Parameter Sweeps
+
+**DO NOT use std::thread for parallel testing.** Use the built-in `RunWithTicks()` pattern:
+
+```cpp
+// 1. Load ticks ONCE into memory
+std::vector<Tick> ticks = LoadTicks(file_path, start_date, end_date);
+
+// 2. For each config, create fresh engine and use RunWithTicks()
+for (const auto& params : configs) {
+    TickBasedEngine engine(config);
+    MyStrategy strategy(params);
+
+    engine.RunWithTicks(ticks, [&strategy](const Tick& tick, TickBasedEngine& eng) {
+        strategy.OnTick(tick, eng);
+    });
+
+    results.push_back(engine.GetResults());
+}
+```
+
+Key points:
+- `config.verbose = false` to suppress logging during sweeps
+- Ticks are shared read-only across all tests (no data races)
+- See `test_parallel_dual_sweep.cpp` for full example with tick loading
+
+---
+
 ## Key Files
 
 | Purpose | File |
