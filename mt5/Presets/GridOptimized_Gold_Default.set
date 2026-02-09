@@ -1,0 +1,15 @@
+; GridOptimized - Gold (XAUUSD) Default Configuration
+; Tested on Jan-Dec 2025: 1.76x return, 31.5% max DD
+; Spacing is in PRICE UNITS ($1 = $1 difference between entries)
+
+InpSurviveDownPct=2.0
+InpMinEntrySpacing=1.0
+InpEnableTrailing=true
+InpATRMultiplier=2.0
+InpATRPeriod=14
+InpMaxPortfolioDD=35.0
+InpEquityFraction=0.5
+InpMinLots=0.01
+InpMaxLots=100.0
+InpMagicNumber=20250116
+InpSlippage=10

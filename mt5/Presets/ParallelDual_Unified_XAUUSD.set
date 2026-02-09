@@ -1,0 +1,15 @@
+; ParallelDual_Unified_EA.mq5 Preset for XAUUSD (Gold)
+; Optimized on 2025 data
+; Result: 13.51x return, 74.57% DD
+;
+InpSurvivePct=15.0
+InpMinSpacing=1.0
+InpMaxSpacing=10.0
+InpBaseSpacing=1.5
+InpTargetTrades=20
+InpMinVolume=0.01
+InpMaxVolume=10.0
+InpMarginStopOut=20.0
+InpSafetyBuffer=1.5
+InpMagicNumber=20260131
+InpComment=PDual_AU

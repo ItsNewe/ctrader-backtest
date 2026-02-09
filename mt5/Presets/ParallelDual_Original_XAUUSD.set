@@ -1,0 +1,18 @@
+; ParallelDual_Original_EA.mq5 Preset for XAUUSD (Gold)
+; Aggressive compounding with TP
+; Optimized on 2025 data
+; Result: 124.84x return, 37.23% DD
+;
+InpSurvivePct=10.0
+InpGridAllocation=0.10
+InpMomentumAllocation=0.90
+InpBaseSpacing=1.5
+InpMomentumSpacing=5.0
+InpUseTakeProfit=true
+InpTPDistance=5.0
+InpMinVolume=0.01
+InpMaxVolume=10.0
+InpMarginStopOut=20.0
+InpForceMinVolume=false
+InpMagicNumber=20260130
+InpComment=PDual_AU_TP

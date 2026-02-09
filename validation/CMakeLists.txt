@@ -3482,134 +3482,6 @@ set_target_properties(test_grid_multi_optimized PROPERTIES RUNTIME_OUTPUT_DIRECT
 message(STATUS "Multi-instrument grid optimized test configured: test_grid_multi_optimized (AVX-512 + threads)")
 endif()
 
-# test_parallel_dual_sweep - ParallelDual strategy multi-parameter sweep
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_parallel_dual_sweep.cpp")
-add_executable(test_parallel_dual_sweep
-    test_parallel_dual_sweep.cpp)
-target_include_directories(test_parallel_dual_sweep PRIVATE ../include)
-target_compile_features(test_parallel_dual_sweep PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_parallel_dual_sweep PRIVATE /W4 /O2 /arch:AVX512)
-else()
-    target_compile_options(test_parallel_dual_sweep PRIVATE -Wall -Wextra -O3 -mavx512f -mavx512dq -mavx2 -pthread)
-    target_link_libraries(test_parallel_dual_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_parallel_dual_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "ParallelDual sweep test configured: test_parallel_dual_sweep (AVX-512 + threads)")
-endif()
-
-# test_parallel_dual_sweep_conservative - ParallelDual strategy conservative sweep
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_parallel_dual_sweep_conservative.cpp")
-add_executable(test_parallel_dual_sweep_conservative
-    test_parallel_dual_sweep_conservative.cpp)
-target_include_directories(test_parallel_dual_sweep_conservative PRIVATE ../include)
-target_compile_features(test_parallel_dual_sweep_conservative PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_parallel_dual_sweep_conservative PRIVATE /W4 /O2 /arch:AVX512)
-else()
-    target_compile_options(test_parallel_dual_sweep_conservative PRIVATE -Wall -Wextra -O3 -mavx512f -mavx512dq -mavx2 -pthread)
-    target_link_libraries(test_parallel_dual_sweep_conservative PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_parallel_dual_sweep_conservative PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "ParallelDual conservative sweep configured: test_parallel_dual_sweep_conservative")
-endif()
-
-# test_survive_capacity_diagnostic - Survive capacity analysis
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_survive_capacity_diagnostic.cpp")
-add_executable(test_survive_capacity_diagnostic
-    test_survive_capacity_diagnostic.cpp)
-target_include_directories(test_survive_capacity_diagnostic PRIVATE ../include)
-target_compile_features(test_survive_capacity_diagnostic PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_survive_capacity_diagnostic PRIVATE /W4 /O2)
-else()
-    target_compile_options(test_survive_capacity_diagnostic PRIVATE -Wall -Wextra -O3)
-    target_link_libraries(test_survive_capacity_diagnostic PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_survive_capacity_diagnostic PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "Survive capacity diagnostic configured: test_survive_capacity_diagnostic")
-endif()
-
-# test_fill_hedge - FillUp/FillDown hedge strategy test
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_fill_hedge.cpp")
-add_executable(test_fill_hedge
-    test_fill_hedge.cpp)
-target_include_directories(test_fill_hedge PRIVATE ../include)
-target_compile_features(test_fill_hedge PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_fill_hedge PRIVATE /W4 /O2)
-else()
-    target_compile_options(test_fill_hedge PRIVATE -Wall -Wextra -O3)
-    target_link_libraries(test_fill_hedge PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_fill_hedge PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "FillUp/FillDown hedge test configured: test_fill_hedge")
-endif()
-
-# test_fill_hedge_unified - FillUp/FillDown hedge with unified margin pool
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_fill_hedge_unified.cpp")
-add_executable(test_fill_hedge_unified
-    test_fill_hedge_unified.cpp)
-target_include_directories(test_fill_hedge_unified PRIVATE ../include)
-target_compile_features(test_fill_hedge_unified PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_fill_hedge_unified PRIVATE /W4 /O2)
-else()
-    target_compile_options(test_fill_hedge_unified PRIVATE -Wall -Wextra -O3)
-    target_link_libraries(test_fill_hedge_unified PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_fill_hedge_unified PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "FillUp/FillDown unified hedge test configured: test_fill_hedge_unified")
-endif()
-
-# test_fill_hedge_regime - Regime-aware FillUp/FillDown hedge
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_fill_hedge_regime.cpp")
-add_executable(test_fill_hedge_regime
-    test_fill_hedge_regime.cpp)
-target_include_directories(test_fill_hedge_regime PRIVATE ../include)
-target_compile_features(test_fill_hedge_regime PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_fill_hedge_regime PRIVATE /W4 /O2)
-else()
-    target_compile_options(test_fill_hedge_regime PRIVATE -Wall -Wextra -O3)
-    target_link_libraries(test_fill_hedge_regime PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_fill_hedge_regime PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "Regime-aware hedge test configured: test_fill_hedge_regime")
-endif()
-
-# test_dual_tp_grid - Dual TP Grid Strategy (2 lots per level: tight + wide TP)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_dual_tp_grid.cpp")
-add_executable(test_dual_tp_grid
-    test_dual_tp_grid.cpp)
-target_include_directories(test_dual_tp_grid PRIVATE ../include)
-target_compile_features(test_dual_tp_grid PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_dual_tp_grid PRIVATE /W4 /O2)
-else()
-    target_compile_options(test_dual_tp_grid PRIVATE -Wall -Wextra -O3)
-    target_link_libraries(test_dual_tp_grid PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_dual_tp_grid PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "Dual TP Grid test configured: test_dual_tp_grid")
-endif()
-
-# test_dual_tp_sweep - Parallel Parameter Sweep for Dual TP Grid Strategy
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_dual_tp_sweep.cpp")
-add_executable(test_dual_tp_sweep
-    test_dual_tp_sweep.cpp)
-target_include_directories(test_dual_tp_sweep PRIVATE ../include)
-target_compile_features(test_dual_tp_sweep PRIVATE cxx_std_17)
-if(MSVC)
-    target_compile_options(test_dual_tp_sweep PRIVATE /W4 /O2)
-else()
-    target_compile_options(test_dual_tp_sweep PRIVATE -Wall -Wextra -O3)
-    target_link_libraries(test_dual_tp_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-endif()
-set_target_properties(test_dual_tp_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
-message(STATUS "Dual TP Sweep test configured: test_dual_tp_sweep")
-endif()
-
 # test_grid_full_period - SKIPPED (source file not found)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_grid_full_period.cpp")
 add_executable(test_grid_full_period
@@ -3631,4 +3503,22 @@ target_compile_options(test_grid_fine_sweep PRIVATE -Wall -Wextra -O3)
 target_link_libraries(test_grid_fine_sweep PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
 set_target_properties(test_grid_fine_sweep PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
 
+endif()
+
+# VIX Strategy Comparison - Spike Fade vs SHORT-Only Grid
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_vix_strategies.cpp")
+add_executable(test_vix_strategies
+    test_vix_strategies.cpp)
+target_include_directories(test_vix_strategies PRIVATE ../include)
+target_compile_features(test_vix_strategies PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(test_vix_strategies PRIVATE /W4 /O2)
+else()
+    # Note: -Og instead of -O3 due to GCC 15 AVX stack alignment bug with large tick vectors
+    target_compile_options(test_vix_strategies PRIVATE -Wall -Wextra -Og -mavx512f -mavx512dq -mavx2 -mfma)
+    target_link_libraries(test_vix_strategies PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+    target_link_options(test_vix_strategies PRIVATE -Wl,--stack,67108864)
+endif()
+set_target_properties(test_vix_strategies PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/validation")
+message(STATUS "VIX strategies test configured: test_vix_strategies")
 endif()

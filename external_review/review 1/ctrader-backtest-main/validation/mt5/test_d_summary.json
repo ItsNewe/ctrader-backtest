@@ -1,0 +1,9 @@
+{
+  "test": "Test D - Spread Widening",
+  "symbol": "EURUSD",
+  "samples_recorded": 219,
+  "duration_seconds": 3600,
+  "sampling_interval": 5,
+  "broker": " Pty Ltd",
+  "account": 000000
+}

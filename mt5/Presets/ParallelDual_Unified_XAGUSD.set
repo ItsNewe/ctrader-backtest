@@ -1,0 +1,15 @@
+; ParallelDual_Unified_EA.mq5 Preset for XAGUSD (Silver)
+; Optimized on 2025 data: $28.885 -> $71.03 (146% increase)
+; Result: 21.42x return, 83.57% DD
+;
+InpSurvivePct=18.0
+InpMinSpacing=0.075
+InpMaxSpacing=0.75
+InpBaseSpacing=0.15
+InpTargetTrades=20
+InpMinVolume=0.01
+InpMaxVolume=10.0
+InpMarginStopOut=20.0
+InpSafetyBuffer=1.5
+InpMagicNumber=20260131
+InpComment=PDual_AG
