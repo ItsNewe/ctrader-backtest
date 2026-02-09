@@ -612,6 +612,76 @@ public:
     size_t GetTotalTrades() const { return closed_trades_.size(); }
     bool IsStopOutOccurred() const { return stop_out_occurred_; }
 
+    // Margin & account state (use these instead of reimplementing margin math)
+    double GetUsedMargin() const {
+        if (open_positions_.empty()) return 0.0;
+
+        const size_t SIMD_THRESHOLD = 4;
+        if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            RefreshSimdCache();
+
+            double used_margin = 0.0;
+            // BUY positions use ask price for margin
+            if (!buy_lot_sizes_.empty()) {
+                buy_prices_buffer_.resize(buy_lot_sizes_.size());
+                std::fill(buy_prices_buffer_.begin(), buy_prices_buffer_.end(), current_tick_.ask);
+                used_margin += simd::total_margin_batch(
+                    buy_lot_sizes_.data(), buy_prices_buffer_.data(),
+                    buy_lot_sizes_.size(), config_.contract_size, config_.leverage
+                ) * config_.margin_rate;
+            }
+            // SELL positions use bid price for margin
+            if (!sell_lot_sizes_.empty()) {
+                sell_prices_buffer_.resize(sell_lot_sizes_.size());
+                std::fill(sell_prices_buffer_.begin(), sell_prices_buffer_.end(), current_tick_.bid);
+                used_margin += simd::total_margin_batch(
+                    sell_lot_sizes_.data(), sell_prices_buffer_.data(),
+                    sell_lot_sizes_.size(), config_.contract_size, config_.leverage
+                ) * config_.margin_rate;
+            }
+            return used_margin;
+        }
+
+        // Scalar fallback
+        double used_margin = 0.0;
+        for (const Trade* trade : open_positions_) {
+            double price = trade->IsBuy() ? current_tick_.ask : current_tick_.bid;
+            used_margin += trade->lot_size * config_.contract_size * price
+                         / config_.leverage * config_.margin_rate;
+        }
+        return used_margin;
+    }
+
+    double GetFreeMargin() const { return equity_ - GetUsedMargin(); }
+
+    double GetMarginLevel() const {
+        double used = GetUsedMargin();
+        return (used > 0) ? (equity_ / used * 100.0) : 0.0;
+    }
+
+    /// Calculate margin required for a hypothetical trade (for lot sizing decisions)
+    double CalculateMarginRequired(double lots, double price) const {
+        return lots * config_.contract_size * price / config_.leverage * config_.margin_rate;
+    }
+
+    /// Normalize lot size to broker constraints (volume_min, volume_max, volume_step)
+    double NormalizeLots(double lots) const {
+        lots = std::max(lots, config_.volume_min);
+        lots = std::min(lots, config_.volume_max);
+        lots = std::floor(lots / config_.volume_step) * config_.volume_step;
+        return lots;
+    }
+
+    const TickBacktestConfig& GetConfig() const { return config_; }
+
+    /// @name Position Aggregates (maintained incrementally — O(1) per tick)
+    /// @{
+    double GetBuyVolume() const { return buy_volume_; }
+    double GetHighestBuyEntry() const { return highest_buy_entry_; }
+    double GetLowestBuyEntry() const { return lowest_buy_entry_; }
+    size_t GetBuyPositionCount() const { return buy_position_count_; }
+    /// @}
+
     // Get equity curve data
     const std::vector<double>& GetEquityCurve() const { return equity_curve_; }
     const std::vector<std::string>& GetEquityTimestamps() const { return equity_timestamps_; }
@@ -843,14 +913,30 @@ private:
     mutable std::vector<double> buy_prices_buffer_;
     mutable std::vector<double> sell_prices_buffer_;
 
+    // SL/TP cache for SIMD batch checking (refreshed alongside SIMD cache)
+    mutable std::vector<double> buy_stop_losses_;
+    mutable std::vector<double> buy_take_profits_;
+    mutable std::vector<double> sell_stop_losses_;
+    mutable std::vector<double> sell_take_profits_;
+
+    // Position aggregates — maintained incrementally via RecalcPositionAggregates()
+    double buy_volume_ = 0.0;
+    double highest_buy_entry_ = -1e308;
+    double lowest_buy_entry_ = 1e308;
+    size_t buy_position_count_ = 0;
+
     // Refresh SIMD cache when positions have changed
     void RefreshSimdCache() const {
         if (!simd_cache_dirty_) return;
 
         buy_entry_prices_.clear();
         buy_lot_sizes_.clear();
+        buy_stop_losses_.clear();
+        buy_take_profits_.clear();
         sell_entry_prices_.clear();
         sell_lot_sizes_.clear();
+        sell_stop_losses_.clear();
+        sell_take_profits_.clear();
         buy_positions_.clear();
         sell_positions_.clear();
 
@@ -858,10 +944,14 @@ private:
             if (trade->IsBuy()) {
                 buy_entry_prices_.push_back(trade->entry_price);
                 buy_lot_sizes_.push_back(trade->lot_size);
+                buy_stop_losses_.push_back(trade->stop_loss);
+                buy_take_profits_.push_back(trade->take_profit);
                 buy_positions_.push_back(trade);
             } else {
                 sell_entry_prices_.push_back(trade->entry_price);
                 sell_lot_sizes_.push_back(trade->lot_size);
+                sell_stop_losses_.push_back(trade->stop_loss);
+                sell_take_profits_.push_back(trade->take_profit);
                 sell_positions_.push_back(trade);
             }
         }
@@ -869,9 +959,27 @@ private:
         simd_cache_dirty_ = false;
     }
 
-    // Mark cache dirty when positions change
+    // Mark cache dirty and recalculate position aggregates when positions change
     void InvalidateSimdCache() {
         simd_cache_dirty_ = true;
+        RecalcPositionAggregates();
+    }
+
+    // Recalculate O(N) aggregates — called only when positions change (open/close)
+    void RecalcPositionAggregates() {
+        buy_volume_ = 0.0;
+        highest_buy_entry_ = -1e308;
+        lowest_buy_entry_ = 1e308;
+        buy_position_count_ = 0;
+
+        for (const Trade* trade : open_positions_) {
+            if (trade->IsBuy()) {
+                buy_volume_ += trade->lot_size;
+                if (trade->entry_price > highest_buy_entry_) highest_buy_entry_ = trade->entry_price;
+                if (trade->entry_price < lowest_buy_entry_) lowest_buy_entry_ = trade->entry_price;
+                buy_position_count_++;
+            }
+        }
     }
 
     double GetPipValue() const {
@@ -1253,79 +1361,118 @@ private:
     }
 
     void ProcessOpenPositions(const Tick& tick) {
-        // Check stop loss, take profit, and trailing stops for all open positions
-        std::vector<Trade*> positions_to_close;
-        std::vector<std::string> close_reasons;
+        if (open_positions_.empty()) return;
 
+        // First pass: update trailing stops (must be scalar — modifies trade state)
+        bool has_trailing = false;
         for (Trade* trade : open_positions_) {
-            bool should_close = false;
-            std::string reason;
+            if (!trade->HasTrailingStop()) continue;
+            has_trailing = true;
 
             if (trade->IsBuy()) {
                 double current_price = tick.bid;
-
-                // Process trailing stop for BUY positions
-                if (trade->HasTrailingStop()) {
-                    // Check if trailing should activate
-                    double profit_pips = current_price - trade->entry_price;
-                    if (!trade->trailing_activated && profit_pips >= trade->trailing_stop_activation) {
-                        trade->trailing_activated = true;
-                        trade->highest_profit_price = current_price;
-                    }
-
-                    // Update trailing stop if activated
-                    if (trade->trailing_activated) {
-                        if (current_price > trade->highest_profit_price) {
-                            trade->highest_profit_price = current_price;
-                            // Move stop loss up
-                            trade->stop_loss = current_price - trade->trailing_stop_distance;
-                        }
-                    }
+                double profit_pips = current_price - trade->entry_price;
+                if (!trade->trailing_activated && profit_pips >= trade->trailing_stop_activation) {
+                    trade->trailing_activated = true;
+                    trade->highest_profit_price = current_price;
                 }
-
-                // Check SL/TP
-                if (trade->stop_loss > 0 && current_price <= trade->stop_loss) {
-                    should_close = true;
-                    reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
-                } else if (trade->take_profit > 0 && current_price >= trade->take_profit) {
-                    should_close = true;
-                    reason = "TP";
+                if (trade->trailing_activated && current_price > trade->highest_profit_price) {
+                    trade->highest_profit_price = current_price;
+                    trade->stop_loss = current_price - trade->trailing_stop_distance;
                 }
-            } else { // SELL
+            } else {
                 double current_price = tick.ask;
-
-                // Process trailing stop for SELL positions
-                if (trade->HasTrailingStop()) {
-                    // Check if trailing should activate (profit = entry - current for SELL)
-                    double profit_pips = trade->entry_price - current_price;
-                    if (!trade->trailing_activated && profit_pips >= trade->trailing_stop_activation) {
-                        trade->trailing_activated = true;
-                        trade->highest_profit_price = current_price;  // Lowest for SELL
-                    }
-
-                    // Update trailing stop if activated
-                    if (trade->trailing_activated) {
-                        if (current_price < trade->highest_profit_price) {
-                            trade->highest_profit_price = current_price;
-                            // Move stop loss down
-                            trade->stop_loss = current_price + trade->trailing_stop_distance;
-                        }
-                    }
+                double profit_pips = trade->entry_price - current_price;
+                if (!trade->trailing_activated && profit_pips >= trade->trailing_stop_activation) {
+                    trade->trailing_activated = true;
+                    trade->highest_profit_price = current_price;
                 }
+                if (trade->trailing_activated && current_price < trade->highest_profit_price) {
+                    trade->highest_profit_price = current_price;
+                    trade->stop_loss = current_price + trade->trailing_stop_distance;
+                }
+            }
+        }
 
-                // Check SL/TP
-                if (trade->stop_loss > 0 && current_price >= trade->stop_loss) {
-                    should_close = true;
-                    reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
-                } else if (trade->take_profit > 0 && current_price <= trade->take_profit) {
-                    should_close = true;
-                    reason = "TP";
+        // If trailing stops changed SL values, invalidate cache so SL arrays are fresh
+        if (has_trailing) {
+            simd_cache_dirty_ = true;
+        }
+
+        // Second pass: batch SL/TP checking with SIMD
+        const size_t SIMD_THRESHOLD = 4;
+        std::vector<Trade*> positions_to_close;
+        std::vector<std::string> close_reasons;
+
+        if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+            RefreshSimdCache();
+
+            // Pre-allocate hit buffers (max possible = all positions)
+            int max_hits = static_cast<int>(std::max(buy_positions_.size(), sell_positions_.size()));
+            std::vector<int> hit_indices(max_hits);
+            std::vector<int> hit_types(max_hits);
+
+            // Batch check BUY positions (exit at bid)
+            if (!buy_positions_.empty()) {
+                int hits = simd::check_sl_tp_buy(
+                    buy_stop_losses_.data(), buy_take_profits_.data(),
+                    tick.bid, buy_positions_.size(),
+                    hit_indices.data(), hit_types.data());
+
+                for (int h = 0; h < hits; ++h) {
+                    Trade* trade = buy_positions_[hit_indices[h]];
+                    positions_to_close.push_back(trade);
+                    if (hit_types[h] == 1)
+                        close_reasons.push_back(trade->trailing_activated ? "TRAILING_SL" : "SL");
+                    else
+                        close_reasons.push_back("TP");
                 }
             }
 
-            if (should_close) {
-                positions_to_close.push_back(trade);
-                close_reasons.push_back(reason);
+            // Batch check SELL positions (exit at ask)
+            if (!sell_positions_.empty()) {
+                int hits = simd::check_sl_tp_sell(
+                    sell_stop_losses_.data(), sell_take_profits_.data(),
+                    tick.ask, sell_positions_.size(),
+                    hit_indices.data(), hit_types.data());
+
+                for (int h = 0; h < hits; ++h) {
+                    Trade* trade = sell_positions_[hit_indices[h]];
+                    positions_to_close.push_back(trade);
+                    if (hit_types[h] == 1)
+                        close_reasons.push_back(trade->trailing_activated ? "TRAILING_SL" : "SL");
+                    else
+                        close_reasons.push_back("TP");
+                }
+            }
+        } else {
+            // Scalar fallback
+            for (Trade* trade : open_positions_) {
+                bool should_close = false;
+                std::string reason;
+
+                if (trade->IsBuy()) {
+                    if (trade->stop_loss > 0 && tick.bid <= trade->stop_loss) {
+                        should_close = true;
+                        reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
+                    } else if (trade->take_profit > 0 && tick.bid >= trade->take_profit) {
+                        should_close = true;
+                        reason = "TP";
+                    }
+                } else {
+                    if (trade->stop_loss > 0 && tick.ask >= trade->stop_loss) {
+                        should_close = true;
+                        reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
+                    } else if (trade->take_profit > 0 && tick.ask <= trade->take_profit) {
+                        should_close = true;
+                        reason = "TP";
+                    }
+                }
+
+                if (should_close) {
+                    positions_to_close.push_back(trade);
+                    close_reasons.push_back(reason);
+                }
             }
         }
 

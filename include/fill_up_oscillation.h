@@ -223,8 +223,6 @@ public:
           base_spacing_(base_spacing),
           min_volume_(min_volume),
           max_volume_(max_volume),
-          contract_size_(contract_size),
-          leverage_(leverage),
           mode_(mode),
           antifragile_scale_(antifragile_scale),
           velocity_threshold_(velocity_threshold),
@@ -360,8 +358,7 @@ private:
     double base_spacing_;
     double min_volume_;
     double max_volume_;
-    double contract_size_;
-    double leverage_;
+    // Note: contract_size_/leverage_ removed — now read from engine.GetConfig()
     Mode mode_;
 
     // Oscillation parameters
@@ -681,76 +678,18 @@ private:
     }
 
     void Iterate(TickBasedEngine& engine) {
-        lowest_buy_ = DBL_MAX;
-        highest_buy_ = DBL_MIN;
-        volume_of_open_trades_ = 0.0;
-
-        const auto& positions = engine.GetOpenPositions();
-        const size_t SIMD_THRESHOLD = 16;
-
-        // SIMD-optimized path for large position counts
-        if (positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
-            // Collect BUY position data for vectorized operations
-            std::vector<double> buy_prices;
-            std::vector<double> buy_lots;
-            buy_prices.reserve(positions.size());
-            buy_lots.reserve(positions.size());
-
-            for (const Trade* trade : positions) {
-                if (trade->IsBuy()) {
-                    buy_prices.push_back(trade->entry_price);
-                    buy_lots.push_back(trade->lot_size);
-                }
-            }
-
-            if (!buy_prices.empty()) {
-                // Vectorized sum, min, max
-                volume_of_open_trades_ = simd::sum(buy_lots.data(), buy_lots.size());
-                lowest_buy_ = simd::min_value(buy_prices.data(), buy_prices.size());
-                highest_buy_ = simd::max_value(buy_prices.data(), buy_prices.size());
-            }
-        } else {
-            // Scalar fallback for small position counts
-            for (const Trade* trade : positions) {
-                if (trade->IsBuy()) {
-                    volume_of_open_trades_ += trade->lot_size;
-                    lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
-                    highest_buy_ = std::max(highest_buy_, trade->entry_price);
-                }
-            }
-        }
+        // Use engine's incrementally-maintained aggregates (O(1) instead of O(N))
+        volume_of_open_trades_ = engine.GetBuyVolume();
+        lowest_buy_ = engine.GetLowestBuyEntry();
+        highest_buy_ = engine.GetHighestBuyEntry();
     }
 
     double CalculateLotSize(TickBasedEngine& engine, int positions_total) {
-        // Similar to original but with anti-fragile scaling
-        double used_margin = 0.0;
-        const auto& positions = engine.GetOpenPositions();
-        const size_t SIMD_THRESHOLD = 16;
-
-        if (positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
-            // SIMD-optimized margin calculation
-            std::vector<double> lot_sizes;
-            std::vector<double> prices;
-            lot_sizes.reserve(positions.size());
-            prices.reserve(positions.size());
-
-            for (const Trade* trade : positions) {
-                lot_sizes.push_back(trade->lot_size);
-                prices.push_back(trade->entry_price);
-            }
-
-            used_margin = simd::total_margin_batch_avx2_optimized(
-                lot_sizes.data(), prices.data(), lot_sizes.size(),
-                contract_size_, leverage_
-            );
-        } else {
-            for (const Trade* trade : positions) {
-                used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
-            }
-        }
+        // Use engine's authoritative margin (current market prices, includes margin_rate)
+        double used_margin = engine.GetUsedMargin();
+        const auto& cfg = engine.GetConfig();
 
         double margin_stop_out = 20.0;
-        double margin_level = (used_margin > 0) ? (current_equity_ / used_margin * 100.0) : 10000.0;
 
         double end_price = (positions_total == 0)
             ? current_ask_ * ((100.0 - survive_pct_) / 100.0)
@@ -761,14 +700,14 @@ private:
         if (number_of_trades <= 0) number_of_trades = 1;
 
         // Calculate base lot size
-        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * contract_size_;
+        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * cfg.contract_size;
         if (used_margin > 0 && (equity_at_target / used_margin * 100.0) < margin_stop_out) {
             return 0.0;
         }
 
         double trade_size = min_volume_;
-        double d_equity = contract_size_ * trade_size * current_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
-        double d_margin = number_of_trades * trade_size * contract_size_ / leverage_;
+        double d_equity = cfg.contract_size * trade_size * current_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
+        double d_margin = engine.CalculateMarginRequired(trade_size, current_ask_) * number_of_trades;
 
         // Find multiplier using binary search (O(log N) instead of O(N))
         double max_mult = max_volume_ / min_volume_;
@@ -807,8 +746,7 @@ private:
             }
         }
 
-        double final_lots = std::min(lots, max_volume_);
-        final_lots = std::round(final_lots * 100.0) / 100.0;
+        double final_lots = engine.NormalizeLots(std::min(lots, max_volume_));
 
         double tp = current_ask_ + current_spread_ + current_spacing_;
         Trade* trade = engine.OpenMarketOrder(TradeDirection::BUY, final_lots, 0.0, tp);
@@ -829,18 +767,12 @@ private:
             return;
         }
 
-        // Safety: margin level floor (calculate from equity and used margin)
+        // Safety: margin level floor
         if (safety_config_.margin_level_floor > 0) {
-            double used_margin = 0.0;
-            for (const Trade* trade : engine.GetOpenPositions()) {
-                used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
-            }
-            if (used_margin > 0) {
-                double margin_level = (current_equity_ / used_margin) * 100.0;
-                if (margin_level < safety_config_.margin_level_floor) {
-                    stats_.margin_level_blocks++;
-                    return;
-                }
+            double margin_level = engine.GetMarginLevel();
+            if (margin_level > 0 && margin_level < safety_config_.margin_level_floor) {
+                stats_.margin_level_blocks++;
+                return;
             }
         }
 

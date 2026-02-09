@@ -57,8 +57,6 @@ public:
           base_spacing_(base_spacing),
           min_volume_(min_volume),
           max_volume_(max_volume),
-          contract_size_(contract_size),
-          leverage_(leverage),
           noise_config_(noise_config),
           lowest_buy_(DBL_MAX),
           highest_buy_(DBL_MIN),
@@ -130,8 +128,7 @@ private:
     double base_spacing_;
     double min_volume_;
     double max_volume_;
-    double contract_size_;
-    double leverage_;
+    // Note: contract_size_/leverage_ removed — now read from engine.GetConfig()
 
     // Noise configuration
     NoiseConfig noise_config_;
@@ -280,24 +277,16 @@ private:
     }
 
     void Iterate(TickBasedEngine& engine) {
-        lowest_buy_ = DBL_MAX;
-        highest_buy_ = DBL_MIN;
-        volume_of_open_trades_ = 0.0;
-
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->IsBuy()) {
-                volume_of_open_trades_ += trade->lot_size;
-                lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
-                highest_buy_ = std::max(highest_buy_, trade->entry_price);
-            }
-        }
+        // Use engine's incrementally-maintained aggregates (O(1) instead of O(N))
+        volume_of_open_trades_ = engine.GetBuyVolume();
+        lowest_buy_ = engine.GetLowestBuyEntry();
+        highest_buy_ = engine.GetHighestBuyEntry();
     }
 
     double CalculateLotSize(TickBasedEngine& engine, int positions_total) {
-        double used_margin = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
-        }
+        // Use engine's authoritative margin (current market prices, includes margin_rate)
+        double used_margin = engine.GetUsedMargin();
+        const auto& cfg = engine.GetConfig();
 
         double margin_stop_out = 20.0;
 
@@ -310,14 +299,14 @@ private:
         if (number_of_trades <= 0) number_of_trades = 1;
 
         // Calculate base lot size
-        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * contract_size_;
+        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * cfg.contract_size;
         if (used_margin > 0 && (equity_at_target / used_margin * 100.0) < margin_stop_out) {
             return 0.0;
         }
 
         double trade_size = min_volume_;
-        double d_equity = contract_size_ * trade_size * base_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
-        double d_margin = number_of_trades * trade_size * contract_size_ / leverage_;
+        double d_equity = cfg.contract_size * trade_size * base_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
+        double d_margin = engine.CalculateMarginRequired(trade_size, current_ask_) * number_of_trades;
 
         // Find multiplier
         double max_mult = max_volume_ / min_volume_;
@@ -339,8 +328,7 @@ private:
     bool Open(double lots, TickBasedEngine& engine) {
         if (lots < min_volume_) return false;
 
-        double final_lots = std::min(lots, max_volume_);
-        final_lots = std::round(final_lots * 100.0) / 100.0;
+        double final_lots = engine.NormalizeLots(std::min(lots, max_volume_));
 
         double tp = current_ask_ + current_spread_ + base_spacing_;
         Trade* trade = engine.OpenMarketOrder("BUY", final_lots, 0.0, tp);

@@ -268,52 +268,40 @@ private:
 
     double CalculateGridLotSize(const Tick& tick, TickBasedEngine& engine) {
         // AGGRESSIVE COMPOUNDING: Use fraction of equity for position sizing
-        // Target: 147x returns from $10K with 380 trades
         double equity = engine.GetEquity();
 
-        // Calculate margin per lot: price * contract_size / leverage
-        double margin_per_lot = tick.ask * config_.contract_size / config_.leverage;
+        // Calculate margin per lot using engine's authoritative calculation
+        double margin_per_lot = engine.CalculateMarginRequired(1.0, tick.ask);
 
         // Use a fraction of equity for each new position
-        // Risk factor: how much of equity to commit as margin per trade
         double risk_factor = 0.05 * config_.grid_allocation;  // 5% of equity * allocation
 
         // Calculate lot size
         double lot = (equity * risk_factor) / margin_per_lot;
 
         // Apply free margin check - don't use more than 50% of free margin
-        double free_margin = equity - GetUsedMargin(engine);
+        double free_margin = engine.GetFreeMargin();
         double max_lot_by_margin = (free_margin * 0.5) / margin_per_lot;
         lot = std::min(lot, max_lot_by_margin);
 
-        // Clamp to min/max
+        // Clamp and normalize
         lot = std::max(lot, config_.min_volume);
         lot = std::min(lot, config_.max_volume);
-
-        // Round to 0.01 lot increments
         lot = std::floor(lot * 100.0) / 100.0;
 
         return lot;
-    }
-
-    double GetUsedMargin(TickBasedEngine& engine) {
-        double used_margin = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            used_margin += trade->lot_size * config_.contract_size * trade->entry_price / config_.leverage;
-        }
-        return used_margin;
     }
 
     double CalculateMomentumLotSize(const Tick& tick, TickBasedEngine& engine) {
         // AGGRESSIVE COMPOUNDING: Use fraction of equity for position sizing
         double equity = engine.GetEquity();
 
-        double margin_per_lot = tick.ask * config_.contract_size / config_.leverage;
+        double margin_per_lot = engine.CalculateMarginRequired(1.0, tick.ask);
         double risk_factor = 0.05 * config_.momentum_allocation;  // 5% of equity * allocation
 
         double lot = (equity * risk_factor) / margin_per_lot;
 
-        double free_margin = equity - GetUsedMargin(engine);
+        double free_margin = engine.GetFreeMargin();
         double max_lot_by_margin = (free_margin * 0.5) / margin_per_lot;
         lot = std::min(lot, max_lot_by_margin);
 
@@ -328,14 +316,11 @@ private:
         // Check if opening this position would cause immediate margin issues
         double equity = engine.GetEquity();
 
-        // Calculate current used margin
-        double used_margin = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            used_margin += trade->lot_size * config_.contract_size * trade->entry_price / config_.leverage;
-        }
+        // Use engine's authoritative margin
+        double used_margin = engine.GetUsedMargin();
 
         // Calculate margin for new position
-        double new_margin = lot * config_.contract_size * tick.ask / config_.leverage;
+        double new_margin = engine.CalculateMarginRequired(lot, tick.ask);
         double total_margin = used_margin + new_margin;
 
         if (total_margin <= 0) return true;

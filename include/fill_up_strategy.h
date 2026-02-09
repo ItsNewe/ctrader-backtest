@@ -33,10 +33,7 @@ public:
           spacing_(spacing_dollars),
           min_volume_(min_volume),
           max_volume_(max_volume),
-          contract_size_(contract_size),
-          leverage_(leverage),
           symbol_digits_(symbol_digits),
-          margin_rate_(margin_rate),
           lowest_buy_(DBL_MAX),
           highest_buy_(DBL_MIN),
           volume_of_open_trades_(0.0),
@@ -120,10 +117,8 @@ private:
     double spacing_;               // Spacing between trades (in currency units)
     double min_volume_;            // Minimum lot size
     double max_volume_;            // Maximum lot size
-    double contract_size_;         // Contract size (e.g., 100 for gold)
-    double leverage_;              // Account leverage
+    // Note: contract_size_/leverage_/margin_rate_ removed — now read from engine.GetConfig()
     int symbol_digits_;            // Price decimal places
-    double margin_rate_;           // Margin rate (initial_margin_rate from MT5)
 
     // Position tracking
     double lowest_buy_;
@@ -159,24 +154,18 @@ private:
     int debug_counter_;
 
     void Iterate(TickBasedEngine& engine) {
-        // Reset tracking variables
-        lowest_buy_ = DBL_MAX;
-        highest_buy_ = DBL_MIN;
+        // Use engine's incrementally-maintained aggregates for volume/highest/lowest
+        volume_of_open_trades_ = engine.GetBuyVolume();
+        lowest_buy_ = engine.GetLowestBuyEntry();
+        highest_buy_ = engine.GetHighestBuyEntry();
+
+        // Strategy-specific: closest_above/below requires per-tick iteration
         closest_above_ = DBL_MAX;
         closest_below_ = DBL_MAX;  // Must be DBL_MAX (like MT5) for gap-fill condition to work
-        volume_of_open_trades_ = 0.0;
 
-        const auto& positions = engine.GetOpenPositions();
-
-        for (const Trade* trade : positions) {
+        for (const Trade* trade : engine.GetOpenPositions()) {
             if (trade->IsBuy()) {
                 double open_price = trade->entry_price;
-                double lots = trade->lot_size;
-
-                volume_of_open_trades_ += lots;
-                lowest_buy_ = std::min(lowest_buy_, open_price);
-                highest_buy_ = std::max(highest_buy_, open_price);
-
                 if (open_price >= current_ask_) {
                     closest_above_ = std::min(closest_above_, open_price - current_ask_);
                 }
@@ -189,9 +178,10 @@ private:
 
     void SizingBuy(TickBasedEngine& engine, int positions_total) {
         trade_size_buy_ = 0.0;
+        const auto& cfg = engine.GetConfig();
 
         // Calculate margin parameters
-        double used_margin = CalculateUsedMargin(engine);
+        double used_margin = engine.GetUsedMargin();
         double margin_stop_out_level = 20.0;  // MT5  stop out level
 
         // Calculate current margin level (equity / used_margin * 100)
@@ -204,7 +194,7 @@ private:
         // Calculate price difference we can survive
         double price_difference = 0.0;
         if (volume_of_open_trades_ > 0) {
-            price_difference = equity_difference / (volume_of_open_trades_ * contract_size_);
+            price_difference = equity_difference / (volume_of_open_trades_ * cfg.contract_size);
         }
 
         // Determine end price (target drawdown level)
@@ -220,23 +210,19 @@ private:
 
         // Calculate if we can afford new positions
         if ((positions_total == 0) || ((current_ask_ - price_difference) < end_price)) {
-            equity_at_target = current_equity_ - volume_of_open_trades_ * std::abs(distance) * contract_size_;
+            equity_at_target = current_equity_ - volume_of_open_trades_ * std::abs(distance) * cfg.contract_size;
             double margin_level = (used_margin > 0) ? (equity_at_target / used_margin * 100.0) : 10000.0;
 
             double trade_size = min_volume_;
 
             if (margin_level > margin_stop_out_level) {
                 // Calculate required equity for all trades in grid
-                double d_equity = contract_size_ * trade_size * (number_of_trades * (number_of_trades + 1) / 2);
-                double d_spread = number_of_trades * trade_size * current_spread_ * contract_size_;
+                double d_equity = cfg.contract_size * trade_size * (number_of_trades * (number_of_trades + 1) / 2);
+                double d_spread = number_of_trades * trade_size * current_spread_ * cfg.contract_size;
                 d_equity += d_spread;
 
-                // Calculate required margin using FOREX mode (matching MT5 EA behavior)
-                // MT5 EA uses: trade_size * contract_size / leverage (no price dependency)
-                // Note: Although ACCOUNT_MARGIN is price-dependent for XAG/USD,
-                // the EA's sizing projection uses the raw FOREX formula
-                double local_used_margin = trade_size * contract_size_ / leverage_;
-                local_used_margin = number_of_trades * local_used_margin;
+                // Calculate required margin for forward-looking grid sizing
+                double local_used_margin = engine.CalculateMarginRequired(trade_size, current_ask_) * number_of_trades;
 
                 // Debug output for first 10 sizing calls
                 if (debug_counter_ < 10) {
@@ -311,38 +297,12 @@ private:
         }
     }
 
-    double CalculateUsedMargin(TickBasedEngine& engine) {
-        // Calculate used margin for all open positions
-        // Uses CURRENT market price (matching MT5's AccountInfoDouble(ACCOUNT_MARGIN))
-        double used_margin = 0.0;
-        const auto& positions = engine.GetOpenPositions();
-
-        for (const Trade* trade : positions) {
-            // Use current bid for BUY positions (current market price for margin)
-            double price = (trade->IsBuy()) ? current_bid_ : current_ask_;
-            used_margin += CalculateMarginForTrade(trade->lot_size, price);
-        }
-
-        return used_margin;
-    }
-
-    double CalculateMarginForTrade(double lots, double price) {
-        // XAUUSD (Gold) uses price-based margin calculation for ACTUAL positions
-        // Margin = Lots * Contract_Size * Price / Leverage * MarginRate
-        // This is CFD_LEVERAGE mode calculation with margin rate
-        return lots * contract_size_ * price / leverage_ * margin_rate_;
-    }
-
-    // Note: CalculateMarginForSizing is no longer used - CFDLEVERAGE margin
-    // is now computed inline in SizingBuy using starting_price and end_price
-
     bool Open(double local_unit, TickBasedEngine& engine) {
         if (local_unit < min_volume_) {
             return false;
         }
 
-        double final_unit = std::min(local_unit, max_volume_);
-        final_unit = NormalizeVolume(final_unit);
+        double final_unit = engine.NormalizeLots(std::min(local_unit, max_volume_));
 
         // Calculate TP
         double tp = current_ask_ + current_spread_ + spacing_buy_;
@@ -351,16 +311,6 @@ private:
         Trade* trade = engine.OpenMarketOrder("BUY", final_unit, 0.0, tp);
 
         return (trade != nullptr);
-    }
-
-    double NormalizeVolume(double volume) {
-        int digits = 2;  // Default for most brokers
-        if (min_volume_ == 0.01) digits = 2;
-        else if (min_volume_ == 0.1) digits = 1;
-        else digits = 0;
-
-        double factor = std::pow(10.0, digits);
-        return std::round(volume * factor) / factor;
     }
 
     void OpenNew(TickBasedEngine& engine) {

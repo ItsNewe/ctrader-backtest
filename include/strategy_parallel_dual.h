@@ -219,20 +219,8 @@ private:
             distance = price * (config_.survive_pct / 100.0);
         }
 
-        // Calculate how much loss 1.0 lot would have at floor
         double loss_per_lot = distance * config_.contract_size;
-
-        // Calculate margin required for 1.0 lot at floor price
-        double margin_per_lot = 1.0 * config_.contract_size * floor / config_.leverage;
-
-        // Equity at floor = equity - loss
-        // Margin level at floor = (equity - loss) / margin * 100
-        // We want margin level > stop_out * safety_buffer
-
-        // Solve for max lots:
-        // (equity - lots * loss_per_lot) / (lots * margin_per_lot) > target_margin_level / 100
-        // equity - lots * loss_per_lot > lots * margin_per_lot * target_margin_level / 100
-        // equity > lots * (loss_per_lot + margin_per_lot * target_margin_level / 100)
+        double margin_per_lot = engine.CalculateMarginRequired(1.0, floor);
 
         double target_margin_level = config_.margin_stop_out * config_.safety_buffer;
         double cost_per_lot = loss_per_lot + margin_per_lot * target_margin_level / 100.0;
@@ -240,80 +228,53 @@ private:
         if (cost_per_lot <= 0) return config_.min_volume;
 
         double max_lots = equity / cost_per_lot;
-
-        // Scale down to leave room for future entries (use 5% of capacity for first entry)
         double lot = max_lots * 0.05;
 
-        // Round to min_volume increments
         lot = std::floor(lot / config_.min_volume) * config_.min_volume;
-
         return std::clamp(lot, config_.min_volume, config_.max_volume);
     }
 
     double CalculateLotForEntry(double price, double floor, TickBasedEngine& engine) {
         double equity = engine.GetEquity();
 
-        // Calculate current P/L at floor and margin requirements
-        // Note: P/L at floor = (floor - entry) * lots * contract for BUY
-        // This is POSITIVE when entry < floor (we're in profit at floor)
+        // Single-pass: compute P/L at floor, P/L at current, and margin at floor
         double current_pnl_at_floor = 0.0;
         double current_margin_at_floor = 0.0;
-        double total_volume = 0.0;
-
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            double pnl = (floor - trade->entry_price) * trade->lot_size * config_.contract_size;
-            current_pnl_at_floor += pnl;
-
-            double margin = trade->lot_size * config_.contract_size * floor / config_.leverage;
-            current_margin_at_floor += margin;
-            total_volume += trade->lot_size;
-        }
-
-        // Equity at floor = current equity + P/L change from current to floor
-        // Current equity already includes current unrealized P/L
-        // P/L change = pnl_at_floor - pnl_at_current_price
         double current_pnl = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            current_pnl += (price - trade->entry_price) * trade->lot_size * config_.contract_size;
-        }
-        double equity_at_floor = equity + (current_pnl_at_floor - current_pnl);
 
+        for (const Trade* trade : engine.GetOpenPositions()) {
+            double lots_x_contract = trade->lot_size * config_.contract_size;
+            current_pnl_at_floor += (floor - trade->entry_price) * lots_x_contract;
+            current_pnl += (price - trade->entry_price) * lots_x_contract;
+            current_margin_at_floor += engine.CalculateMarginRequired(trade->lot_size, floor);
+        }
+
+        double equity_at_floor = equity + (current_pnl_at_floor - current_pnl);
         if (equity_at_floor <= 0) return 0.0;
 
         double target_margin_level = config_.margin_stop_out * config_.safety_buffer;
 
-        // Check if current margin level at floor allows new positions
         if (current_margin_at_floor > 0) {
             double current_margin_level = (equity_at_floor / current_margin_at_floor) * 100.0;
             if (current_margin_level < target_margin_level * 2.0) {
-                return 0.0;  // Already too tight
+                return 0.0;
             }
         }
 
-        // For new trade at current price, dropping to floor:
-        // Loss = (price - floor) * lots * contract_size
         double distance = price - floor;
         if (distance <= 0) distance = price * (config_.survive_pct / 100.0);
 
         double loss_per_lot = distance * config_.contract_size;
-        double margin_per_lot = 1.0 * config_.contract_size * floor / config_.leverage;
+        double margin_per_lot = engine.CalculateMarginRequired(1.0, floor);
 
-        // Available equity for new trade
         double required_reserve = current_margin_at_floor * target_margin_level / 100.0;
         double available = equity_at_floor - required_reserve;
-
         if (available <= 0) return 0.0;
 
-        // Cost per lot = loss + margin reserve needed
         double cost_per_lot = loss_per_lot + margin_per_lot * target_margin_level / 100.0;
         if (cost_per_lot <= 0) return config_.min_volume;
 
-        double max_lots = available / cost_per_lot;
-
-        // Scale down to leave room for future entries
-        // Use simpler scaling: take 20% of max capacity per trade
-        max_lots = max_lots * 0.20;
-
+        double max_lots = available / cost_per_lot * 0.20;
         double lot = std::floor(max_lots / config_.min_volume) * config_.min_volume;
 
         return std::clamp(lot, 0.0, config_.max_volume);
@@ -322,34 +283,24 @@ private:
     bool CanSurvive(const Tick& tick, TickBasedEngine& engine, double new_lot, double floor) {
         double equity = engine.GetEquity();
 
-        // Calculate total unrealized loss at floor for all existing trades + new trade
+        // Single-pass: compute loss and margin at floor for all existing positions
         double total_loss = 0.0;
         double total_margin = 0.0;
 
         for (const Trade* trade : engine.GetOpenPositions()) {
-            double loss = (trade->entry_price - floor) * trade->lot_size * config_.contract_size;
-            total_loss += loss;
-
-            double margin = trade->lot_size * config_.contract_size * floor / config_.leverage;
-            total_margin += margin;
+            total_loss += (trade->entry_price - floor) * trade->lot_size * config_.contract_size;
+            total_margin += engine.CalculateMarginRequired(trade->lot_size, floor);
         }
 
-        // Add new trade
-        double new_loss = (tick.ask - floor) * new_lot * config_.contract_size;
-        double new_margin = new_lot * config_.contract_size * floor / config_.leverage;
+        // Add hypothetical new trade
+        total_loss += (tick.ask - floor) * new_lot * config_.contract_size;
+        total_margin += engine.CalculateMarginRequired(new_lot, floor);
 
-        total_loss += new_loss;
-        total_margin += new_margin;
-
-        // Calculate margin level at floor
         double equity_at_floor = equity - total_loss;
         if (equity_at_floor <= 0) return false;
-
         if (total_margin <= 0) return true;
 
         double margin_level = (equity_at_floor / total_margin) * 100.0;
-
-        // Must stay above stop_out level with safety buffer
         return margin_level > config_.margin_stop_out * config_.safety_buffer;
     }
 
@@ -361,17 +312,14 @@ private:
             return;
         }
 
-        // Calculate available margin for new trades
         double equity = engine.GetEquity();
         double current_loss_at_floor = 0.0;
         double current_margin_at_floor = 0.0;
 
+        // Single-pass: compute loss and margin at floor
         for (const Trade* trade : engine.GetOpenPositions()) {
-            double loss = (trade->entry_price - floor) * trade->lot_size * config_.contract_size;
-            current_loss_at_floor += loss;
-
-            double margin = trade->lot_size * config_.contract_size * floor / config_.leverage;
-            current_margin_at_floor += margin;
+            current_loss_at_floor += (trade->entry_price - floor) * trade->lot_size * config_.contract_size;
+            current_margin_at_floor += engine.CalculateMarginRequired(trade->lot_size, floor);
         }
 
         double equity_at_floor = equity - current_loss_at_floor;
@@ -380,14 +328,12 @@ private:
         double usable_equity = equity_at_floor - (current_margin_at_floor * target_margin_level / 100.0);
 
         if (usable_equity <= 0) {
-            // No margin available - use max spacing
             current_adaptive_spacing_ = config_.max_spacing;
             return;
         }
 
-        // Calculate cost per trade at min_volume
         double loss_per_trade = (remaining_distance / config_.target_trades_in_range) * config_.min_volume * config_.contract_size;
-        double margin_per_trade = config_.min_volume * config_.contract_size * floor / config_.leverage;
+        double margin_per_trade = engine.CalculateMarginRequired(config_.min_volume, floor);
         double cost_per_trade = loss_per_trade + margin_per_trade * target_margin_level / 100.0;
 
         if (cost_per_trade <= 0) {
@@ -395,14 +341,10 @@ private:
             return;
         }
 
-        // How many trades can we afford?
         int max_trades = static_cast<int>(usable_equity / cost_per_trade);
         max_trades = std::max(1, max_trades);
 
-        // Calculate spacing to spread trades evenly
         double spacing = remaining_distance / max_trades;
-
-        // Clamp to reasonable bounds
         current_adaptive_spacing_ = std::clamp(spacing, config_.min_spacing, config_.max_spacing);
     }
 };

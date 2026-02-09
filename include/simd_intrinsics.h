@@ -1036,6 +1036,337 @@ inline double max_drawdown(const double* equity, size_t n) {
 }
 
 //=============================================================================
+// Batch SL/TP checking (returns bitmask of positions to close)
+//=============================================================================
+
+// AVX2: Check 4 BUY positions at once for SL/TP hits
+// Returns number of hits found; hit_indices filled with position indices
+inline int check_sl_tp_buy_avx2(
+    const double* stop_losses,     // SL prices (0 = no SL)
+    const double* take_profits,    // TP prices (0 = no TP)
+    double bid_price,              // Current bid for BUY exit
+    size_t n,                      // Number of positions
+    int* hit_indices,              // Output: indices of positions to close
+    int* hit_types)                // Output: 1=SL, 2=TP
+{
+    __m256d bid_vec = _mm256_set1_pd(bid_price);
+    __m256d zero = _mm256_setzero_pd();
+    int hit_count = 0;
+
+    size_t i = 0;
+    for (; i + 4 <= n; i += 4) {
+        __m256d sl = _mm256_loadu_pd(stop_losses + i);
+        __m256d tp = _mm256_loadu_pd(take_profits + i);
+
+        // SL hit: sl > 0 AND bid <= sl
+        __m256d sl_active = _mm256_cmp_pd(sl, zero, _CMP_GT_OQ);
+        __m256d sl_hit = _mm256_cmp_pd(bid_vec, sl, _CMP_LE_OQ);
+        sl_hit = _mm256_and_pd(sl_active, sl_hit);
+
+        // TP hit: tp > 0 AND bid >= tp
+        __m256d tp_active = _mm256_cmp_pd(tp, zero, _CMP_GT_OQ);
+        __m256d tp_hit = _mm256_cmp_pd(bid_vec, tp, _CMP_GE_OQ);
+        tp_hit = _mm256_and_pd(tp_active, tp_hit);
+
+        // Extract masks
+        int sl_mask = _mm256_movemask_pd(sl_hit);
+        int tp_mask = _mm256_movemask_pd(tp_hit);
+
+        // Process hits (SL takes priority over TP)
+        int combined = sl_mask | tp_mask;
+        if (combined) {
+            for (int j = 0; j < 4; ++j) {
+                if (sl_mask & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 1; // SL
+                    hit_count++;
+                } else if (tp_mask & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 2; // TP
+                    hit_count++;
+                }
+            }
+        }
+    }
+
+    // Scalar remainder
+    for (; i < n; ++i) {
+        if (stop_losses[i] > 0 && bid_price <= stop_losses[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 1;
+            hit_count++;
+        } else if (take_profits[i] > 0 && bid_price >= take_profits[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 2;
+            hit_count++;
+        }
+    }
+
+    return hit_count;
+}
+
+// AVX2: Check 4 SELL positions at once for SL/TP hits
+inline int check_sl_tp_sell_avx2(
+    const double* stop_losses,
+    const double* take_profits,
+    double ask_price,
+    size_t n,
+    int* hit_indices,
+    int* hit_types)
+{
+    __m256d ask_vec = _mm256_set1_pd(ask_price);
+    __m256d zero = _mm256_setzero_pd();
+    int hit_count = 0;
+
+    size_t i = 0;
+    for (; i + 4 <= n; i += 4) {
+        __m256d sl = _mm256_loadu_pd(stop_losses + i);
+        __m256d tp = _mm256_loadu_pd(take_profits + i);
+
+        // SL hit: sl > 0 AND ask >= sl
+        __m256d sl_active = _mm256_cmp_pd(sl, zero, _CMP_GT_OQ);
+        __m256d sl_hit = _mm256_cmp_pd(ask_vec, sl, _CMP_GE_OQ);
+        sl_hit = _mm256_and_pd(sl_active, sl_hit);
+
+        // TP hit: tp > 0 AND ask <= tp
+        __m256d tp_active = _mm256_cmp_pd(tp, zero, _CMP_GT_OQ);
+        __m256d tp_hit = _mm256_cmp_pd(ask_vec, tp, _CMP_LE_OQ);
+        tp_hit = _mm256_and_pd(tp_active, tp_hit);
+
+        int sl_mask = _mm256_movemask_pd(sl_hit);
+        int tp_mask = _mm256_movemask_pd(tp_hit);
+
+        int combined = sl_mask | tp_mask;
+        if (combined) {
+            for (int j = 0; j < 4; ++j) {
+                if (sl_mask & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 1;
+                    hit_count++;
+                } else if (tp_mask & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 2;
+                    hit_count++;
+                }
+            }
+        }
+    }
+
+    for (; i < n; ++i) {
+        if (stop_losses[i] > 0 && ask_price >= stop_losses[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 1;
+            hit_count++;
+        } else if (take_profits[i] > 0 && ask_price <= take_profits[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 2;
+            hit_count++;
+        }
+    }
+
+    return hit_count;
+}
+
+#ifdef __AVX512F__
+// AVX-512: Check 8 BUY positions at once
+inline int check_sl_tp_buy_avx512(
+    const double* stop_losses, const double* take_profits,
+    double bid_price, size_t n, int* hit_indices, int* hit_types)
+{
+    __m512d bid_vec = _mm512_set1_pd(bid_price);
+    __m512d zero = _mm512_setzero_pd();
+    int hit_count = 0;
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m512d sl = _mm512_loadu_pd(stop_losses + i);
+        __m512d tp = _mm512_loadu_pd(take_profits + i);
+
+        // SL: sl > 0 AND bid <= sl
+        __mmask8 sl_active = _mm512_cmp_pd_mask(sl, zero, _CMP_GT_OQ);
+        __mmask8 sl_hit = _mm512_mask_cmp_pd_mask(sl_active, bid_vec, sl, _CMP_LE_OQ);
+
+        // TP: tp > 0 AND bid >= tp
+        __mmask8 tp_active = _mm512_cmp_pd_mask(tp, zero, _CMP_GT_OQ);
+        __mmask8 tp_hit = _mm512_mask_cmp_pd_mask(tp_active, bid_vec, tp, _CMP_GE_OQ);
+
+        __mmask8 combined = sl_hit | tp_hit;
+        if (combined) {
+            for (int j = 0; j < 8; ++j) {
+                if (sl_hit & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 1;
+                    hit_count++;
+                } else if (tp_hit & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 2;
+                    hit_count++;
+                }
+            }
+        }
+    }
+
+    // Scalar remainder
+    for (; i < n; ++i) {
+        if (stop_losses[i] > 0 && bid_price <= stop_losses[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 1;
+            hit_count++;
+        } else if (take_profits[i] > 0 && bid_price >= take_profits[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 2;
+            hit_count++;
+        }
+    }
+    return hit_count;
+}
+
+// AVX-512: Check 8 SELL positions at once
+inline int check_sl_tp_sell_avx512(
+    const double* stop_losses, const double* take_profits,
+    double ask_price, size_t n, int* hit_indices, int* hit_types)
+{
+    __m512d ask_vec = _mm512_set1_pd(ask_price);
+    __m512d zero = _mm512_setzero_pd();
+    int hit_count = 0;
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m512d sl = _mm512_loadu_pd(stop_losses + i);
+        __m512d tp = _mm512_loadu_pd(take_profits + i);
+
+        __mmask8 sl_active = _mm512_cmp_pd_mask(sl, zero, _CMP_GT_OQ);
+        __mmask8 sl_hit = _mm512_mask_cmp_pd_mask(sl_active, ask_vec, sl, _CMP_GE_OQ);
+
+        __mmask8 tp_active = _mm512_cmp_pd_mask(tp, zero, _CMP_GT_OQ);
+        __mmask8 tp_hit = _mm512_mask_cmp_pd_mask(tp_active, ask_vec, tp, _CMP_LE_OQ);
+
+        __mmask8 combined = sl_hit | tp_hit;
+        if (combined) {
+            for (int j = 0; j < 8; ++j) {
+                if (sl_hit & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 1;
+                    hit_count++;
+                } else if (tp_hit & (1 << j)) {
+                    hit_indices[hit_count] = static_cast<int>(i + j);
+                    hit_types[hit_count] = 2;
+                    hit_count++;
+                }
+            }
+        }
+    }
+
+    for (; i < n; ++i) {
+        if (stop_losses[i] > 0 && ask_price >= stop_losses[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 1;
+            hit_count++;
+        } else if (take_profits[i] > 0 && ask_price <= take_profits[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 2;
+            hit_count++;
+        }
+    }
+    return hit_count;
+}
+
+// AVX-512 margin batch (with per-position prices)
+inline double total_margin_batch_avx512(
+    const double* lot_sizes, const double* prices, size_t n,
+    double contract_size, double leverage) {
+
+    __m512d contract_vec = _mm512_set1_pd(contract_size);
+    __m512d leverage_inv = _mm512_set1_pd(1.0 / leverage);
+    __m512d sum0 = _mm512_setzero_pd();
+    __m512d sum1 = _mm512_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        _mm_prefetch(reinterpret_cast<const char*>(lot_sizes + i + 32), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(prices + i + 32), _MM_HINT_T0);
+
+        __m512d lots0 = _mm512_loadu_pd(lot_sizes + i);
+        __m512d lots1 = _mm512_loadu_pd(lot_sizes + i + 8);
+        __m512d prc0 = _mm512_loadu_pd(prices + i);
+        __m512d prc1 = _mm512_loadu_pd(prices + i + 8);
+
+        __m512d m0 = _mm512_mul_pd(_mm512_mul_pd(lots0, prc0), contract_vec);
+        __m512d m1 = _mm512_mul_pd(_mm512_mul_pd(lots1, prc1), contract_vec);
+        sum0 = _mm512_add_pd(sum0, _mm512_mul_pd(m0, leverage_inv));
+        sum1 = _mm512_add_pd(sum1, _mm512_mul_pd(m1, leverage_inv));
+    }
+
+    for (; i + 8 <= n; i += 8) {
+        __m512d lots = _mm512_loadu_pd(lot_sizes + i);
+        __m512d prc = _mm512_loadu_pd(prices + i);
+        __m512d m = _mm512_mul_pd(_mm512_mul_pd(lots, prc), contract_vec);
+        sum0 = _mm512_add_pd(sum0, _mm512_mul_pd(m, leverage_inv));
+    }
+
+    sum0 = _mm512_add_pd(sum0, sum1);
+    double result = _mm512_reduce_add_pd(sum0);
+
+    for (; i < n; ++i) {
+        result += lot_sizes[i] * prices[i] * contract_size / leverage;
+    }
+    return result;
+}
+#endif
+
+// Auto-dispatch: SL/TP batch check for BUY positions
+inline int check_sl_tp_buy(
+    const double* stop_losses, const double* take_profits,
+    double bid_price, size_t n, int* hit_indices, int* hit_types) {
+#ifdef __AVX512F__
+    if (g_cpu_features.avx512f)
+        return check_sl_tp_buy_avx512(stop_losses, take_profits, bid_price, n, hit_indices, hit_types);
+#endif
+    if (g_cpu_features.avx2)
+        return check_sl_tp_buy_avx2(stop_losses, take_profits, bid_price, n, hit_indices, hit_types);
+    // Scalar fallback
+    int hit_count = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (stop_losses[i] > 0 && bid_price <= stop_losses[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 1;
+            hit_count++;
+        } else if (take_profits[i] > 0 && bid_price >= take_profits[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 2;
+            hit_count++;
+        }
+    }
+    return hit_count;
+}
+
+// Auto-dispatch: SL/TP batch check for SELL positions
+inline int check_sl_tp_sell(
+    const double* stop_losses, const double* take_profits,
+    double ask_price, size_t n, int* hit_indices, int* hit_types) {
+#ifdef __AVX512F__
+    if (g_cpu_features.avx512f)
+        return check_sl_tp_sell_avx512(stop_losses, take_profits, ask_price, n, hit_indices, hit_types);
+#endif
+    if (g_cpu_features.avx2)
+        return check_sl_tp_sell_avx2(stop_losses, take_profits, ask_price, n, hit_indices, hit_types);
+    // Scalar fallback
+    int hit_count = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (stop_losses[i] > 0 && ask_price >= stop_losses[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 1;
+            hit_count++;
+        } else if (take_profits[i] > 0 && ask_price <= take_profits[i]) {
+            hit_indices[hit_count] = static_cast<int>(i);
+            hit_types[hit_count] = 2;
+            hit_count++;
+        }
+    }
+    return hit_count;
+}
+
+//=============================================================================
 // Aligned Memory Allocation
 //=============================================================================
 
@@ -1160,6 +1491,17 @@ inline double total_margin_batch_avx2_optimized(
     }
 
     return result;
+}
+
+// Auto-dispatch: margin batch with per-position prices (AVX-512 preferred, AVX2 fallback)
+inline double total_margin_batch(
+    const double* lot_sizes, const double* prices, size_t n,
+    double contract_size, double leverage) {
+#ifdef __AVX512F__
+    if (g_cpu_features.avx512f)
+        return total_margin_batch_avx512(lot_sizes, prices, n, contract_size, leverage);
+#endif
+    return total_margin_batch_avx2_optimized(lot_sizes, prices, n, contract_size, leverage);
 }
 
 //=============================================================================
