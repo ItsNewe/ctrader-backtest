@@ -1,0 +1,33 @@
+; ParallelDual_Original_EA preset for XAGUSD - MT5 VERIFIED
+; Generated 2026-02-01 from C++ sweep using actual MT5 tick data
+;
+; Key finding: max_volume = 5 lots is CRITICAL for surviving the Dec 29 crash
+; Previous params with max_volume=100 all stopped out on 12.8% flash crash
+;
+; Test period: 2025.01.01 - 2026.01.29
+; Result: 62.44x return, 64.62% max DD (survived Dec 29 crash)
+
+; === Core Settings ===
+InpSurvivePct=35.0
+InpGridAllocation=0.15
+InpMomentumAllocation=0.85
+
+; === Spacing ===
+InpBaseSpacing=0.10
+InpMomentumSpacing=1.0
+
+; === Take Profit ===
+InpUseTakeProfit=true
+InpTPDistance=0.30
+
+; === Volume Limits - CRITICAL ===
+InpMinVolume=0.01
+InpMaxVolume=5.0
+
+; === Safety ===
+InpMarginStopOut=20.0
+InpForceMinVolume=false
+
+; === EA Settings ===
+InpMagicNumber=20260201
+InpComment=PDual_AG_Verified

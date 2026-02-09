@@ -1,0 +1,15 @@
+; GridOptimized - NAS100 Conservative Configuration
+; Tested on Apr-Jul 2025: 1.04x return, 3.6% max DD (low risk)
+; Spacing is in INDEX POINTS (not MT5 points!)
+
+InpSurviveDownPct=10.0
+InpMinEntrySpacing=50.0
+InpEnableTrailing=true
+InpATRMultiplier=2.0
+InpATRPeriod=14
+InpMaxPortfolioDD=25.0
+InpEquityFraction=0.5
+InpMinLots=0.01
+InpMaxLots=100.0
+InpMagicNumber=20250115
+InpSlippage=10

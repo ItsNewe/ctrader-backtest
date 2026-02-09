@@ -1,0 +1,29 @@
+; ParallelDual_Original_EA preset for XAUUSD
+; Generated from C++ backtest sweep on 2026-02-01
+; Best result: 142.08x return, 40.69% max DD, 206 entries
+; Test period: 2025.01.01 - 2026.01.29
+
+; === Core Settings ===
+InpSurvivePct=15.0
+InpGridAllocation=0.05
+InpMomentumAllocation=0.95
+
+; === Spacing ===
+InpBaseSpacing=0.5
+InpMomentumSpacing=10.0
+
+; === Take Profit ===
+InpUseTakeProfit=true
+InpTPDistance=4.0
+
+; === Volume Limits ===
+InpMinVolume=0.01
+InpMaxVolume=100.0
+
+; === Safety ===
+InpMarginStopOut=20.0
+InpForceMinVolume=false
+
+; === EA Settings ===
+InpMagicNumber=20260201
+InpComment=PDual_AU_Best

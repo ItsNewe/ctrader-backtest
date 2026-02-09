@@ -1,0 +1,34 @@
+; ParallelDual_Original_EA preset for XAGUSD - CONSERVATIVE
+; Generated 2026-02-01
+; Based on MT5 Strategy Tester results showing stop-out during Dec 29 crash
+; Previous "best" params stopped out on 12.8% flash crash ($83.80 -> $73.05)
+;
+; Changes from Best:
+; - InpSurvivePct: 11 -> 20 (handle 20% drops)
+; - InpMaxVolume: 100 -> 20 (limit single position risk)
+; - InpMomentumAllocation: 0.80 -> 0.60 (reduce momentum exposure)
+
+; === Core Settings ===
+InpSurvivePct=20.0
+InpGridAllocation=0.20
+InpMomentumAllocation=0.60
+
+; === Spacing ===
+InpBaseSpacing=0.1
+InpMomentumSpacing=1.0
+
+; === Take Profit ===
+InpUseTakeProfit=true
+InpTPDistance=0.4
+
+; === Volume Limits ===
+InpMinVolume=0.01
+InpMaxVolume=20.0
+
+; === Safety ===
+InpMarginStopOut=20.0
+InpForceMinVolume=false
+
+; === EA Settings ===
+InpMagicNumber=20260201
+InpComment=PDual_AG_Cons

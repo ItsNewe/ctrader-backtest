@@ -1,0 +1,23 @@
+; TrailingGrid EA - Optimized Settings for XAUUSD
+; Backtest: 2025 XAUUSD, Return 7.33x, MaxDD 59%
+; All price parameters are in $ (price move), not dollar profit
+
+; === Grid Settings ===
+MaxPositions=20
+Spacing=1.0
+SurvivePct=13.0
+StopOpeningPct=13.0
+
+; === Trailing Stop Settings (all in price $) ===
+MinProfitPoints=0.30
+TrailDistance=15.0
+UpdateThreshold=1.0
+
+; === Risk Management ===
+RiskPercent=80.0
+MaxLotSize=10.0
+MinLotSize=0.01
+
+; === General ===
+MagicNumber=123456
+TradeComment=TrailingGrid

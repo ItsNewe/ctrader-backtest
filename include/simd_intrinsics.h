@@ -1505,6 +1505,330 @@ inline double total_margin_batch(
 }
 
 //=============================================================================
+// Margin Calculation — ALL TradeCalcMode variants
+// AVX-512 (8-wide double), AVX2 fallback (4-wide double), scalar remainder
+//=============================================================================
+
+// ---------------------------------------------------------------------------
+// CFD_LEVERAGE (mode 4): margin = lots * cs * price / leverage * margin_rate
+// ---------------------------------------------------------------------------
+inline double total_margin_cfd_leverage_avx512(
+    const double* lot_sizes, const double* prices, size_t n,
+    double contract_size, double leverage, double margin_rate) {
+
+    const double factor = contract_size / leverage * margin_rate;
+    __m512d fac_vec = _mm512_set1_pd(factor);
+    __m512d sum0 = _mm512_setzero_pd();
+    __m512d sum1 = _mm512_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m512d lots0 = _mm512_loadu_pd(lot_sizes + i);
+        __m512d lots1 = _mm512_loadu_pd(lot_sizes + i + 8);
+        __m512d prc0 = _mm512_loadu_pd(prices + i);
+        __m512d prc1 = _mm512_loadu_pd(prices + i + 8);
+        // margin = lots * price * factor
+        sum0 = _mm512_fmadd_pd(_mm512_mul_pd(lots0, prc0), fac_vec, sum0);
+        sum1 = _mm512_fmadd_pd(_mm512_mul_pd(lots1, prc1), fac_vec, sum1);
+    }
+    for (; i + 8 <= n; i += 8) {
+        __m512d lots = _mm512_loadu_pd(lot_sizes + i);
+        __m512d prc = _mm512_loadu_pd(prices + i);
+        sum0 = _mm512_fmadd_pd(_mm512_mul_pd(lots, prc), fac_vec, sum0);
+    }
+    sum0 = _mm512_add_pd(sum0, sum1);
+    double result = _mm512_reduce_add_pd(sum0);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * prices[i] * factor;
+    return result;
+}
+
+inline double total_margin_cfd_leverage_avx2(
+    const double* lot_sizes, const double* prices, size_t n,
+    double contract_size, double leverage, double margin_rate) {
+
+    const double factor = contract_size / leverage * margin_rate;
+    __m256d fac_vec = _mm256_set1_pd(factor);
+    __m256d sum0 = _mm256_setzero_pd();
+    __m256d sum1 = _mm256_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256d lots0 = _mm256_loadu_pd(lot_sizes + i);
+        __m256d lots1 = _mm256_loadu_pd(lot_sizes + i + 4);
+        __m256d prc0 = _mm256_loadu_pd(prices + i);
+        __m256d prc1 = _mm256_loadu_pd(prices + i + 4);
+        sum0 = _mm256_fmadd_pd(_mm256_mul_pd(lots0, prc0), fac_vec, sum0);
+        sum1 = _mm256_fmadd_pd(_mm256_mul_pd(lots1, prc1), fac_vec, sum1);
+    }
+    for (; i + 4 <= n; i += 4) {
+        __m256d lots = _mm256_loadu_pd(lot_sizes + i);
+        __m256d prc = _mm256_loadu_pd(prices + i);
+        sum0 = _mm256_fmadd_pd(_mm256_mul_pd(lots, prc), fac_vec, sum0);
+    }
+    sum0 = _mm256_add_pd(sum0, sum1);
+    __m128d lo = _mm256_castpd256_pd128(sum0);
+    __m128d hi = _mm256_extractf128_pd(sum0, 1);
+    lo = _mm_add_pd(lo, hi);
+    lo = _mm_add_pd(lo, _mm_shuffle_pd(lo, lo, 1));
+    double result;
+    _mm_store_sd(&result, lo);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * prices[i] * factor;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// CFD / CFD_INDEX (mode 2/3): margin = lots * cs * price * margin_rate  (NO leverage)
+// ---------------------------------------------------------------------------
+inline double total_margin_cfd_avx512(
+    const double* lot_sizes, const double* prices, size_t n,
+    double contract_size, double margin_rate) {
+
+    const double factor = contract_size * margin_rate;
+    __m512d fac_vec = _mm512_set1_pd(factor);
+    __m512d sum0 = _mm512_setzero_pd();
+    __m512d sum1 = _mm512_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m512d lots0 = _mm512_loadu_pd(lot_sizes + i);
+        __m512d lots1 = _mm512_loadu_pd(lot_sizes + i + 8);
+        __m512d prc0 = _mm512_loadu_pd(prices + i);
+        __m512d prc1 = _mm512_loadu_pd(prices + i + 8);
+        sum0 = _mm512_fmadd_pd(_mm512_mul_pd(lots0, prc0), fac_vec, sum0);
+        sum1 = _mm512_fmadd_pd(_mm512_mul_pd(lots1, prc1), fac_vec, sum1);
+    }
+    for (; i + 8 <= n; i += 8) {
+        __m512d lots = _mm512_loadu_pd(lot_sizes + i);
+        __m512d prc = _mm512_loadu_pd(prices + i);
+        sum0 = _mm512_fmadd_pd(_mm512_mul_pd(lots, prc), fac_vec, sum0);
+    }
+    sum0 = _mm512_add_pd(sum0, sum1);
+    double result = _mm512_reduce_add_pd(sum0);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * prices[i] * factor;
+    return result;
+}
+
+inline double total_margin_cfd_avx2(
+    const double* lot_sizes, const double* prices, size_t n,
+    double contract_size, double margin_rate) {
+
+    const double factor = contract_size * margin_rate;
+    __m256d fac_vec = _mm256_set1_pd(factor);
+    __m256d sum0 = _mm256_setzero_pd();
+    __m256d sum1 = _mm256_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256d lots0 = _mm256_loadu_pd(lot_sizes + i);
+        __m256d lots1 = _mm256_loadu_pd(lot_sizes + i + 4);
+        __m256d prc0 = _mm256_loadu_pd(prices + i);
+        __m256d prc1 = _mm256_loadu_pd(prices + i + 4);
+        sum0 = _mm256_fmadd_pd(_mm256_mul_pd(lots0, prc0), fac_vec, sum0);
+        sum1 = _mm256_fmadd_pd(_mm256_mul_pd(lots1, prc1), fac_vec, sum1);
+    }
+    for (; i + 4 <= n; i += 4) {
+        __m256d lots = _mm256_loadu_pd(lot_sizes + i);
+        __m256d prc = _mm256_loadu_pd(prices + i);
+        sum0 = _mm256_fmadd_pd(_mm256_mul_pd(lots, prc), fac_vec, sum0);
+    }
+    sum0 = _mm256_add_pd(sum0, sum1);
+    __m128d lo = _mm256_castpd256_pd128(sum0);
+    __m128d hi = _mm256_extractf128_pd(sum0, 1);
+    lo = _mm_add_pd(lo, hi);
+    lo = _mm_add_pd(lo, _mm_shuffle_pd(lo, lo, 1));
+    double result;
+    _mm_store_sd(&result, lo);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * prices[i] * factor;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// FOREX (mode 0): margin = lots * cs / leverage * margin_rate  (NO price)
+// ---------------------------------------------------------------------------
+inline double total_margin_forex_avx512(
+    const double* lot_sizes, size_t n,
+    double contract_size, double leverage, double margin_rate) {
+
+    const double factor = contract_size / leverage * margin_rate;
+    __m512d fac_vec = _mm512_set1_pd(factor);
+    __m512d sum0 = _mm512_setzero_pd();
+    __m512d sum1 = _mm512_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m512d lots0 = _mm512_loadu_pd(lot_sizes + i);
+        __m512d lots1 = _mm512_loadu_pd(lot_sizes + i + 8);
+        sum0 = _mm512_fmadd_pd(lots0, fac_vec, sum0);
+        sum1 = _mm512_fmadd_pd(lots1, fac_vec, sum1);
+    }
+    for (; i + 8 <= n; i += 8) {
+        __m512d lots = _mm512_loadu_pd(lot_sizes + i);
+        sum0 = _mm512_fmadd_pd(lots, fac_vec, sum0);
+    }
+    sum0 = _mm512_add_pd(sum0, sum1);
+    double result = _mm512_reduce_add_pd(sum0);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * factor;
+    return result;
+}
+
+inline double total_margin_forex_avx2(
+    const double* lot_sizes, size_t n,
+    double contract_size, double leverage, double margin_rate) {
+
+    const double factor = contract_size / leverage * margin_rate;
+    __m256d fac_vec = _mm256_set1_pd(factor);
+    __m256d sum0 = _mm256_setzero_pd();
+    __m256d sum1 = _mm256_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256d lots0 = _mm256_loadu_pd(lot_sizes + i);
+        __m256d lots1 = _mm256_loadu_pd(lot_sizes + i + 4);
+        sum0 = _mm256_fmadd_pd(lots0, fac_vec, sum0);
+        sum1 = _mm256_fmadd_pd(lots1, fac_vec, sum1);
+    }
+    for (; i + 4 <= n; i += 4) {
+        __m256d lots = _mm256_loadu_pd(lot_sizes + i);
+        sum0 = _mm256_fmadd_pd(lots, fac_vec, sum0);
+    }
+    sum0 = _mm256_add_pd(sum0, sum1);
+    __m128d lo = _mm256_castpd256_pd128(sum0);
+    __m128d hi = _mm256_extractf128_pd(sum0, 1);
+    lo = _mm_add_pd(lo, hi);
+    lo = _mm_add_pd(lo, _mm_shuffle_pd(lo, lo, 1));
+    double result;
+    _mm_store_sd(&result, lo);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * factor;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// FUTURES (mode 1): margin = lots * margin_initial  (fixed per lot)
+// ---------------------------------------------------------------------------
+inline double total_margin_futures_avx512(
+    const double* lot_sizes, size_t n, double margin_initial) {
+
+    __m512d mi_vec = _mm512_set1_pd(margin_initial);
+    __m512d sum0 = _mm512_setzero_pd();
+    __m512d sum1 = _mm512_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m512d lots0 = _mm512_loadu_pd(lot_sizes + i);
+        __m512d lots1 = _mm512_loadu_pd(lot_sizes + i + 8);
+        sum0 = _mm512_fmadd_pd(lots0, mi_vec, sum0);
+        sum1 = _mm512_fmadd_pd(lots1, mi_vec, sum1);
+    }
+    for (; i + 8 <= n; i += 8) {
+        __m512d lots = _mm512_loadu_pd(lot_sizes + i);
+        sum0 = _mm512_fmadd_pd(lots, mi_vec, sum0);
+    }
+    sum0 = _mm512_add_pd(sum0, sum1);
+    double result = _mm512_reduce_add_pd(sum0);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * margin_initial;
+    return result;
+}
+
+inline double total_margin_futures_avx2(
+    const double* lot_sizes, size_t n, double margin_initial) {
+
+    __m256d mi_vec = _mm256_set1_pd(margin_initial);
+    __m256d sum0 = _mm256_setzero_pd();
+    __m256d sum1 = _mm256_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256d lots0 = _mm256_loadu_pd(lot_sizes + i);
+        __m256d lots1 = _mm256_loadu_pd(lot_sizes + i + 4);
+        sum0 = _mm256_fmadd_pd(lots0, mi_vec, sum0);
+        sum1 = _mm256_fmadd_pd(lots1, mi_vec, sum1);
+    }
+    for (; i + 4 <= n; i += 4) {
+        __m256d lots = _mm256_loadu_pd(lot_sizes + i);
+        sum0 = _mm256_fmadd_pd(lots, mi_vec, sum0);
+    }
+    sum0 = _mm256_add_pd(sum0, sum1);
+    __m128d lo = _mm256_castpd256_pd128(sum0);
+    __m128d hi = _mm256_extractf128_pd(sum0, 1);
+    lo = _mm_add_pd(lo, hi);
+    lo = _mm_add_pd(lo, _mm_shuffle_pd(lo, lo, 1));
+    double result;
+    _mm_store_sd(&result, lo);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * margin_initial;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// FOREX_NO_LEVERAGE (mode 5): margin = lots * cs * margin_rate  (NO price, NO leverage)
+// ---------------------------------------------------------------------------
+inline double total_margin_forex_nolev_avx512(
+    const double* lot_sizes, size_t n,
+    double contract_size, double margin_rate) {
+
+    const double factor = contract_size * margin_rate;
+    __m512d fac_vec = _mm512_set1_pd(factor);
+    __m512d sum0 = _mm512_setzero_pd();
+    __m512d sum1 = _mm512_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m512d lots0 = _mm512_loadu_pd(lot_sizes + i);
+        __m512d lots1 = _mm512_loadu_pd(lot_sizes + i + 8);
+        sum0 = _mm512_fmadd_pd(lots0, fac_vec, sum0);
+        sum1 = _mm512_fmadd_pd(lots1, fac_vec, sum1);
+    }
+    for (; i + 8 <= n; i += 8) {
+        __m512d lots = _mm512_loadu_pd(lot_sizes + i);
+        sum0 = _mm512_fmadd_pd(lots, fac_vec, sum0);
+    }
+    sum0 = _mm512_add_pd(sum0, sum1);
+    double result = _mm512_reduce_add_pd(sum0);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * factor;
+    return result;
+}
+
+inline double total_margin_forex_nolev_avx2(
+    const double* lot_sizes, size_t n,
+    double contract_size, double margin_rate) {
+
+    const double factor = contract_size * margin_rate;
+    __m256d fac_vec = _mm256_set1_pd(factor);
+    __m256d sum0 = _mm256_setzero_pd();
+    __m256d sum1 = _mm256_setzero_pd();
+
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256d lots0 = _mm256_loadu_pd(lot_sizes + i);
+        __m256d lots1 = _mm256_loadu_pd(lot_sizes + i + 4);
+        sum0 = _mm256_fmadd_pd(lots0, fac_vec, sum0);
+        sum1 = _mm256_fmadd_pd(lots1, fac_vec, sum1);
+    }
+    for (; i + 4 <= n; i += 4) {
+        __m256d lots = _mm256_loadu_pd(lot_sizes + i);
+        sum0 = _mm256_fmadd_pd(lots, fac_vec, sum0);
+    }
+    sum0 = _mm256_add_pd(sum0, sum1);
+    __m128d lo = _mm256_castpd256_pd128(sum0);
+    __m128d hi = _mm256_extractf128_pd(sum0, 1);
+    lo = _mm_add_pd(lo, hi);
+    lo = _mm_add_pd(lo, _mm_shuffle_pd(lo, lo, 1));
+    double result;
+    _mm_store_sd(&result, lo);
+    for (; i < n; ++i)
+        result += lot_sizes[i] * factor;
+    return result;
+}
+
+//=============================================================================
 // Utility: Print CPU Features
 //=============================================================================
 

@@ -351,6 +351,7 @@ public:
     // Safety statistics
     const Stats& GetStats() const { return stats_; }
     void SetSafetyConfig(const SafetyConfig& config) { safety_config_ = config; }
+    void SetMaxVolume(double v) { max_volume_ = v; }
 
 private:
     // Base parameters

@@ -1,0 +1,40 @@
+; CombinedJu_EA Preset: s13_sp1.5_tpLIN_szUNI_v1 (CONSERVATIVE - LOWEST DD)
+; Lowest DD configuration from 800-config sweep: 13.05x return, 66.6% DD
+; Settings: survive=13%, spacing=$1.5, LINEAR TP, UNIFORM sizing, velocity ON
+;
+; IMPORTANT: ForceMinVolumeEntry=false ensures crash survival
+; Best risk-adjusted return - highest return per unit of drawdown
+;
+; === Core Grid Parameters ===
+SurvivePct=13.0
+BaseSpacing=1.5
+MinVolume=0.01
+MaxVolume=10.0
+; === Volatility Adaptation ===
+VolatilityLookbackHours=4.0
+TypicalVolPct=0.55
+MinSpacingMult=0.5
+MaxSpacingMult=3.0
+MinSpacingAbs=0.5
+MaxSpacingAbs=5.0
+SpacingChangeThreshold=0.1
+; === Take Profit Mode ===
+TPMode=2
+TPSqrtScale=0.5
+TPLinearScale=0.3
+TPMin=1.0
+; === Velocity Filter (Wu Wei) ===
+EnableVelocityFilter=true
+VelocityWindow=10
+VelocityThresholdPct=0.01
+; === Position Sizing ===
+SizingMode=0
+SizingLinearScale=0.5
+SizingThresholdPos=5
+SizingThresholdMult=2.0
+; === Safety Settings ===
+ForceMinVolumeEntry=false
+; === Trading Settings ===
+MagicNumber=20260128
+TradeComment=CombinedJu_Conservative
+Slippage=30
