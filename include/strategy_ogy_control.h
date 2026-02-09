@@ -45,8 +45,7 @@ public:
         int local_minmax_window = 100;     // Window for local min/max detection
         int cooldown_ticks = 50;           // Min ticks between entries
         int max_positions = 50;            // Max concurrent positions
-        double contract_size = 100.0;
-        double leverage = 500.0;
+        // Note: contract_size/leverage removed — now read from engine.GetConfig()
         int warmup_ticks = 500;            // Warmup before trading
         double min_velocity_threshold = 0.001;  // Minimum velocity to consider ($/tick)
 

@@ -694,8 +694,7 @@ int main() {
             sc.exit_std_devs = tc.exit_std;
             sc.lot_size = tc.lot_size;
             sc.max_lots = 0.10;
-            sc.contract_size = 100.0;
-            sc.leverage = 500.0;
+            // contract_size/leverage now read from engine.GetConfig()
             sc.max_positions = 5;
             sc.sl_pct = tc.sl_pct;
             sc.tp_pct = tc.tp_pct;

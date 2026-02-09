@@ -237,8 +237,7 @@ VDPResult run_vdp_test(const VDPTask& task, const std::vector<Tick>& ticks) {
             vcfg.use_phase_exit = task.use_phase_exit;
             vcfg.lot_size = 0.02;
             vcfg.max_lots = 0.50;
-            vcfg.contract_size = 100.0;
-            vcfg.leverage = 500.0;
+            // contract_size/leverage now read from engine.GetConfig()
             vcfg.cooldown_ticks = 200;
             vcfg.max_positions = 20;
             vcfg.warmup_ticks = 2000;

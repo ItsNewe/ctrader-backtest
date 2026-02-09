@@ -57,8 +57,7 @@ public:
         // Position sizing
         double lot_size = 0.02;
         double max_lots = 0.50;
-        double contract_size = 100.0;
-        double leverage = 500.0;
+        // Note: contract_size/leverage removed — now read from engine.GetConfig()
 
         // Risk management
         double survive_pct = 13.0;           // Max allowed adverse move
@@ -313,8 +312,8 @@ private:
         auto positions = engine.GetOpenPositions();
         for (int i = (int)positions.size() - 1; i >= 0; i--) {
             Trade* t = positions[i];
-            if (t->direction == "BUY") {
-                double pnl = (tick.bid - t->entry_price) * t->lot_size * config_.contract_size;
+            if (t->IsBuy()) {
+                double pnl = (tick.bid - t->entry_price) * t->lot_size * engine.GetConfig().contract_size;
                 // Only close if profitable
                 if (pnl > 0) {
                     engine.ClosePosition(t, "PHASE_EXIT_PEAK");

@@ -49,9 +49,7 @@ public:
         double lot_size = 0.01;
         double max_lots = 0.10;
 
-        // Instrument settings (for gold)
-        double contract_size = 100.0;
-        double leverage = 500.0;
+        // Note: contract_size/leverage removed — now read from engine.GetConfig()
 
         // Risk management
         double max_positions = 5;

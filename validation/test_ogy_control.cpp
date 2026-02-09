@@ -212,8 +212,7 @@ OGYResult run_test(const OGYTask& task, const std::vector<Tick>& ticks) {
         strat_cfg.local_minmax_window = task.velocity_window;  // Use same window
         strat_cfg.cooldown_ticks = task.cooldown_ticks;
         strat_cfg.max_positions = 50;
-        strat_cfg.contract_size = 100.0;
-        strat_cfg.leverage = 500.0;
+        // contract_size/leverage now read from engine.GetConfig()
         strat_cfg.warmup_ticks = 500;
         strat_cfg.min_velocity_threshold = 0.001;
         strat_cfg.random_mode = task.random_mode;
