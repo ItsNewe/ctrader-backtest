@@ -43,8 +43,6 @@ public:
         double fast_tp_pct = 0.10;          // Tight TP for fast drops (0.1% bounce)
         double slow_tp_pct = 0.20;          // Wider TP for slow entries (0.2%)
         double sl_pct = 0.50;               // Stop loss at 0.5% below entry
-        double contract_size = 100.0;
-        double leverage = 500.0;
         int cooldown_ticks = 200;           // Min ticks between entries
         int max_positions = 20;
         int warmup_ticks = 500;
@@ -91,10 +89,7 @@ public:
         if (!can_enter) return;
 
         // Calculate total current exposure
-        double total_lots = 0.0;
-        for (const Trade* t : engine.GetOpenPositions()) {
-            total_lots += t->lot_size;
-        }
+        double total_lots = engine.GetBuyVolume();
         if (total_lots >= config_.max_lots) return;
 
         // FAST DOWN: Deploy aggressively (exploit fear discount)
@@ -106,7 +101,7 @@ public:
             double speed_ratio = std::abs(velocity / config_.fast_down_threshold);
             double scale = std::min(config_.max_scale, speed_ratio);
             double lots = std::min(config_.base_lots * scale, config_.max_lots - total_lots);
-            lots = std::max(0.01, std::floor(lots * 100.0) / 100.0);
+            lots = std::max(0.01, engine.NormalizeLots(lots));
 
             // Tight TP (expect quick bounce from panic selling)
             double tp = tick.ask + tick.ask * config_.fast_tp_pct / 100.0;
@@ -120,7 +115,7 @@ public:
         else if (velocity >= config_.slow_up_threshold && velocity < config_.slow_up_threshold * 3) {
             // Standard size, wider TP
             double lots = std::min(config_.base_lots, config_.max_lots - total_lots);
-            lots = std::max(0.01, std::floor(lots * 100.0) / 100.0);
+            lots = std::max(0.01, engine.NormalizeLots(lots));
 
             double tp = tick.ask + tick.ask * config_.slow_tp_pct / 100.0;
             double sl = tick.ask - tick.ask * config_.sl_pct / 100.0;

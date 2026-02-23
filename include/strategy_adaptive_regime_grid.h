@@ -32,13 +32,10 @@ public:
     };
 
     struct Config {
-        // Core grid parameters
+        // Core grid parameters (broker fields contract_size, leverage,
+        // min_volume, max_volume come from engine.GetConfig())
         double survive_pct = 13.0;
         double base_spacing = 1.50;
-        double min_volume = 0.01;
-        double max_volume = 10.0;
-        double contract_size = 100.0;
-        double leverage = 500.0;
         double volatility_lookback_hours = 4.0;
         double typical_vol_pct = 0.55;
 
@@ -97,7 +94,7 @@ public:
             Config c;
             c.survive_pct = 19.0;
             c.base_spacing = 2.0;
-            c.contract_size = 5000.0;
+            // contract_size = 5000.0 is set in engine config, not here
             c.volatility_lookback_hours = 1.0;
             c.typical_vol_pct = 0.45;
             c.pct_spacing = true;
@@ -425,6 +422,8 @@ private:
         const auto& positions = engine.GetOpenPositions();
         if (positions.empty()) return;
 
+        const auto& cfg = engine.GetConfig();
+
         // Collect positions with unrealized P/L
         struct PosInfo {
             Trade* trade;
@@ -436,7 +435,7 @@ private:
         for (Trade* trade : positions) {
             double exit_price = trade->IsBuy() ? current_bid_ : current_ask_;
             double pl = (exit_price - trade->entry_price) * trade->lot_size *
-                        config_.contract_size * (trade->IsBuy() ? 1.0 : -1.0);
+                        cfg.contract_size * (trade->IsBuy() ? 1.0 : -1.0);
             pos_list.push_back({trade, pl});
         }
 
@@ -471,21 +470,12 @@ private:
         return current_ask_ + current_spread_ + std::max(tp_min_abs, tp_addition);
     }
 
-    // --- Position Iteration ---
+    // --- Position Iteration (uses engine O(1) aggregates) ---
     void Iterate(TickBasedEngine& engine) {
-        lowest_buy_ = DBL_MAX;
-        highest_buy_ = DBL_MIN;
-        volume_of_open_trades_ = 0.0;
-        position_count_ = 0;
-
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->IsBuy()) {
-                volume_of_open_trades_ += trade->lot_size;
-                lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
-                highest_buy_ = std::max(highest_buy_, trade->entry_price);
-                position_count_++;
-            }
-        }
+        volume_of_open_trades_ = engine.GetBuyVolume();
+        lowest_buy_ = engine.GetLowestBuyEntry();
+        highest_buy_ = engine.GetHighestBuyEntry();
+        position_count_ = (int)engine.GetBuyPositionCount();
 
         if (position_count_ == 0) {
             first_entry_price_ = 0.0;
@@ -498,11 +488,8 @@ private:
 
     // --- Binary Search Lot Sizing (from FillUpOscillation) ---
     double CalculateLotSize(TickBasedEngine& engine, int positions_total, double dd_pct) {
-        double used_margin = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            used_margin += trade->lot_size * config_.contract_size *
-                          trade->entry_price / config_.leverage;
-        }
+        const auto& cfg = engine.GetConfig();
+        double used_margin = engine.GetUsedMargin();
 
         double margin_stop_out = 20.0;
 
@@ -515,18 +502,18 @@ private:
         if (number_of_trades <= 0) number_of_trades = 1;
 
         double equity_at_target = current_equity_ -
-                                 volume_of_open_trades_ * distance * config_.contract_size;
+                                 volume_of_open_trades_ * distance * cfg.contract_size;
         if (used_margin > 0 && (equity_at_target / used_margin * 100.0) < margin_stop_out) {
             return 0.0;
         }
 
-        double trade_size = config_.min_volume;
-        double d_equity = config_.contract_size * trade_size * current_spacing_ *
+        double trade_size = cfg.volume_min;
+        double d_equity = cfg.contract_size * trade_size * current_spacing_ *
                          (number_of_trades * (number_of_trades + 1) / 2);
-        double d_margin = number_of_trades * trade_size * config_.contract_size / config_.leverage;
+        double d_margin = number_of_trades * engine.CalculateMarginRequired(trade_size, current_ask_);
 
         // Binary search for largest valid multiplier
-        double max_mult = config_.max_volume / config_.min_volume;
+        double max_mult = cfg.volume_max / cfg.volume_min;
         double low = 1.0, high = max_mult;
         double best_mult = 1.0;
 
@@ -541,7 +528,7 @@ private:
                 high = mid;
             }
         }
-        trade_size = best_mult * config_.min_volume;
+        trade_size = best_mult * cfg.volume_min;
 
         // Apply DD reduction: at dd_reduce_threshold, cut sizing by 50%
         if (dd_pct >= config_.dd_reduce_threshold) {
@@ -549,23 +536,23 @@ private:
             trade_size *= dd_factor;
         }
 
-        return std::min(trade_size, config_.max_volume);
+        return std::min(trade_size, cfg.volume_max);
     }
 
     // --- Open a position ---
     bool Open(double lots, double tp, TickBasedEngine& engine, bool use_trailing) {
-        if (lots < config_.min_volume) {
+        const auto& cfg = engine.GetConfig();
+        if (lots < cfg.volume_min) {
             if (config_.force_min_volume_entry) {
-                lots = config_.min_volume;
+                lots = cfg.volume_min;
             } else {
                 stats_.lot_size_zero_blocks++;
                 return false;
             }
         }
 
-        double final_lots = std::min(lots, config_.max_volume);
-        final_lots = std::round(final_lots * 100.0) / 100.0;
-        if (final_lots < config_.min_volume) return false;
+        double final_lots = engine.NormalizeLots(lots);
+        if (final_lots < cfg.volume_min) return false;
 
         Trade* trade = nullptr;
         if (use_trailing && config_.use_trailing_in_trends) {
@@ -592,7 +579,7 @@ private:
 
     // --- Main entry logic ---
     void OpenNew(TickBasedEngine& engine, double effective_spacing, double dd_pct) {
-        int positions_total = (int)engine.GetOpenPositions().size();
+        int positions_total = position_count_;
 
         if (positions_total == 0) {
             // First position: set equilibrium, no velocity filter

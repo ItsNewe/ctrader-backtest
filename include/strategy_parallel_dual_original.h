@@ -34,9 +34,6 @@ public:
         double momentum_allocation;   // Fraction of equity for momentum
         double min_volume;
         double max_volume;
-        double contract_size;
-        double leverage;
-
         // Grid-specific
         double base_spacing;          // Base spacing for grid entries ($)
 
@@ -57,8 +54,6 @@ public:
               momentum_allocation(0.5),
               min_volume(0.01),
               max_volume(10.0),
-              contract_size(100.0),
-              leverage(500.0),
               base_spacing(1.50),
               momentum_spacing(5.0),
               margin_stop_out(20.0),
@@ -287,7 +282,7 @@ private:
         // Clamp and normalize
         lot = std::max(lot, config_.min_volume);
         lot = std::min(lot, config_.max_volume);
-        lot = std::floor(lot * 100.0) / 100.0;
+        lot = engine.NormalizeLots(lot);
 
         return lot;
     }
@@ -307,7 +302,7 @@ private:
 
         lot = std::max(lot, config_.min_volume);
         lot = std::min(lot, config_.max_volume);
-        lot = std::floor(lot * 100.0) / 100.0;
+        lot = engine.NormalizeLots(lot);
 
         return lot;
     }

@@ -38,11 +38,7 @@ public:
         double survive_down_pct;   // % drop to survive for "up while down"
         double survive_up_pct;     // % drop to survive for "up while up"
 
-        // Position sizing
-        double min_volume;
-        double max_volume;
-        double contract_size;
-        double leverage;
+        // Position sizing (contract_size, leverage, min/max volume come from engine.GetConfig())
         double margin_stopout;    // Margin call level %
         double commission_pips;    // Commission in pips
 
@@ -61,10 +57,6 @@ public:
         Config() :
             survive_down_pct(5.0),
             survive_up_pct(4.0),
-            min_volume(0.01),
-            max_volume(10.0),
-            contract_size(100.0),
-            leverage(500.0),
             margin_stopout(20.0),
             commission_pips(0.0),
             sizing_mode(CONSTANT),
@@ -147,10 +139,7 @@ public:
         UpdateDirection(tick, engine);
 
         // Track total volume
-        double total_volume = 0.0;
-        for (auto* pos : engine.GetOpenPositions()) {
-            total_volume += pos->lot_size;
-        }
+        double total_volume = engine.GetBuyVolume();
         stats_.max_volume = std::max(stats_.max_volume, total_volume);
 
         // Execute strategies
@@ -213,12 +202,13 @@ private:
         auto& positions = engine.GetOpenPositions();
         if (positions.empty()) return;
 
+        const auto& cfg = engine.GetConfig();
         double total_profit = 0.0;
         bool has_unprofitable = false;
 
         for (auto* pos : positions) {
             double price_diff = tick.bid - pos->entry_price;
-            double unrealized = price_diff * pos->lot_size * config_.contract_size;
+            double unrealized = price_diff * pos->lot_size * cfg.contract_size;
             total_profit += unrealized;
             if (unrealized < 0) has_unprofitable = true;
         }
@@ -231,7 +221,7 @@ private:
             if (total_profit > 0) {
                 for (auto* pos : positions) {
                     double price_diff = tick.bid - pos->entry_price;
-                    double unrealized = price_diff * pos->lot_size * config_.contract_size;
+                    double unrealized = price_diff * pos->lot_size * cfg.contract_size;
                     if (unrealized > 0) {
                         to_close.push_back(pos);
                     }
@@ -259,29 +249,25 @@ private:
     }
 
     void RefreshGridState(TickBasedEngine& engine) {
-        grid_volume_ = 0.0;
-        grid_count_ = 0;
-        highest_entry_ = DBL_MIN;
-        lowest_entry_ = DBL_MAX;
-
-        for (auto* pos : engine.GetOpenPositions()) {
-            grid_volume_ += pos->lot_size;
-            grid_count_++;
-            highest_entry_ = std::max(highest_entry_, pos->entry_price);
-            lowest_entry_ = std::min(lowest_entry_, pos->entry_price);
-        }
+        const auto& cfg = engine.GetConfig();
+        grid_volume_ = engine.GetBuyVolume();
+        grid_count_ = (int)engine.GetBuyPositionCount();
+        highest_entry_ = (grid_count_ > 0) ? engine.GetHighestBuyEntry() : DBL_MIN;
+        lowest_entry_ = (grid_count_ > 0) ? engine.GetLowestBuyEntry() : DBL_MAX;
 
         if (config_.sizing_mode == INCREMENTAL) {
-            // Find max lot size for incremental mode
+            // Find max lot size for incremental mode (needs per-position scan)
             grid_lot_size_ = 0.0;
             for (auto* pos : engine.GetOpenPositions()) {
                 grid_lot_size_ = std::max(grid_lot_size_, pos->lot_size);
             }
-            grid_lot_size_ += config_.min_volume;
+            grid_lot_size_ += cfg.volume_min;
         }
     }
 
     void ExecuteUpWhileDown(const Tick& tick, TickBasedEngine& engine) {
+        const auto& cfg = engine.GetConfig();
+
         // Calculate sizing if no positions yet
         if (grid_count_ == 0) {
             CalculateGridSizing(tick, engine);
@@ -297,7 +283,7 @@ private:
                 stats_.down_grid_volume += grid_lot_size_;
 
                 if (config_.sizing_mode == INCREMENTAL) {
-                    grid_lot_size_ += config_.min_volume;
+                    grid_lot_size_ += cfg.volume_min;
                 }
             }
             return;
@@ -312,9 +298,9 @@ private:
                 double distance = highest_entry_ - tick.ask;
                 double levels = std::floor(distance / grid_spacing_);
                 double lot_per_level = grid_lot_size_;
-                double spacing_fraction = grid_spacing_ / (lot_per_level / config_.min_volume);
+                double spacing_fraction = grid_spacing_ / (lot_per_level / cfg.volume_min);
                 double sub_levels = std::floor((distance - levels * grid_spacing_) / spacing_fraction);
-                double expected_volume = levels * lot_per_level + sub_levels * config_.min_volume;
+                double expected_volume = levels * lot_per_level + sub_levels * cfg.volume_min;
                 volume_to_add = expected_volume - (grid_volume_ - grid_lot_size_);
                 break;
             }
@@ -326,8 +312,8 @@ private:
                 for (int i = 1; i <= (int)levels; i++) triangular_sum += i;
                 double spacing_fraction = grid_spacing_ / (levels + 1);
                 double sub_levels = std::floor((distance - levels * grid_spacing_) / spacing_fraction);
-                double expected_volume = (triangular_sum + sub_levels) * config_.min_volume;
-                volume_to_add = expected_volume - (grid_volume_ - config_.min_volume);
+                double expected_volume = (triangular_sum + sub_levels) * cfg.volume_min;
+                volume_to_add = expected_volume - (grid_volume_ - cfg.volume_min);
                 break;
             }
 
@@ -353,12 +339,14 @@ private:
     }
 
     void ExecuteUpWhileUp(const Tick& tick, TickBasedEngine& engine) {
+        const auto& cfg = engine.GetConfig();
+
         // "Up while up": buy when price makes new high
         if (momentum_volume_ == 0.0 || last_momentum_entry_ < tick.ask) {
             // Calculate lot size based on margin capacity
             double lot_size = CalculateMomentumLotSize(tick, engine);
 
-            if (lot_size >= config_.min_volume) {
+            if (lot_size >= cfg.volume_min) {
                 if (OpenBuy(lot_size, tick, engine)) {
                     last_momentum_entry_ = tick.ask;
                     momentum_volume_ += lot_size;
@@ -370,14 +358,9 @@ private:
     }
 
     void CalculateGridSizing(const Tick& tick, TickBasedEngine& engine) {
+        const auto& cfg = engine.GetConfig();
         double equity = engine.GetEquity();
-        double used_margin = 0.0;
-
-        // Calculate current used margin
-        for (auto* pos : engine.GetOpenPositions()) {
-            double margin = (pos->lot_size * config_.contract_size * pos->entry_price) / config_.leverage;
-            used_margin += margin;
-        }
+        double used_margin = engine.GetUsedMargin();
 
         // Target price for survival
         double end_price = tick.ask * ((100.0 - config_.survive_down_pct) / 100.0);
@@ -391,10 +374,10 @@ private:
         if (margin_level == DBL_MAX) equity_at_target = equity;
 
         // Estimate number of trades we can afford
-        double trade_size = config_.min_volume;
-        double margin_per_trade = (trade_size * config_.contract_size * tick.ask) / config_.leverage;
-        double loss_per_trade = trade_size * config_.contract_size * price_range +
-                               trade_size * spread_and_commission_ * config_.contract_size;
+        double trade_size = cfg.volume_min;
+        double margin_per_trade = (trade_size * cfg.contract_size * tick.ask) / cfg.leverage;
+        double loss_per_trade = trade_size * cfg.contract_size * price_range +
+                               trade_size * spread_and_commission_ * cfg.contract_size;
         double cost_per_trade = (config_.margin_stopout / 100.0) * margin_per_trade + loss_per_trade;
 
         double num_trades;
@@ -412,9 +395,9 @@ private:
             double proportion = num_trades / price_range;
             if (proportion >= 1.0) {
                 grid_spacing_ = 1.0;
-                grid_lot_size_ = std::floor(proportion) * config_.min_volume;
+                grid_lot_size_ = std::floor(proportion) * cfg.volume_min;
             } else {
-                grid_lot_size_ = config_.min_volume;
+                grid_lot_size_ = cfg.volume_min;
                 grid_spacing_ = std::round((price_range / num_trades) * 100.0) / 100.0;
             }
             break;
@@ -424,7 +407,7 @@ private:
             double temp = (-1.0 + std::sqrt(1.0 + 8.0 * num_trades)) / 2.0;
             temp = std::floor(temp);
             grid_spacing_ = price_range / (temp - 1.0);
-            grid_lot_size_ = config_.min_volume;
+            grid_lot_size_ = cfg.volume_min;
             break;
         }
 
@@ -432,9 +415,9 @@ private:
             double proportion = num_trades / price_range;
             if (proportion >= 1.0) {
                 grid_spacing_ = 1.0;
-                grid_lot_size_ = std::floor(proportion) * config_.min_volume;
+                grid_lot_size_ = std::floor(proportion) * cfg.volume_min;
             } else {
-                grid_lot_size_ = config_.min_volume;
+                grid_lot_size_ = cfg.volume_min;
                 grid_spacing_ = std::round((price_range / num_trades) * 100.0) / 100.0;
             }
 
@@ -464,63 +447,55 @@ private:
         }
 
         // Ensure minimum values
-        grid_lot_size_ = std::max(config_.min_volume, grid_lot_size_);
+        grid_lot_size_ = std::max(cfg.volume_min, grid_lot_size_);
         grid_spacing_ = std::max(0.01, grid_spacing_);
     }
 
     double CalculateMomentumLotSize(const Tick& tick, TickBasedEngine& engine) {
+        const auto& cfg = engine.GetConfig();
         double equity = engine.GetEquity();
-        double used_margin = 0.0;
-
-        for (auto* pos : engine.GetOpenPositions()) {
-            double margin = (pos->lot_size * config_.contract_size * tick.ask) / config_.leverage;
-            used_margin += margin;
-        }
+        double used_margin = engine.GetUsedMargin();
 
         // Target drop distance
         double end_price = tick.ask * ((100.0 - config_.survive_up_pct) / 100.0);
         double distance = tick.ask - end_price;
 
         // Get current total volume
-        double total_volume = 0.0;
-        for (auto* pos : engine.GetOpenPositions()) {
-            total_volume += pos->lot_size;
-        }
+        double total_volume = engine.GetBuyVolume();
 
         // Check if we can add more
         double equity_at_target = equity * config_.margin_stopout / 100.0;
         double equity_difference = equity - equity_at_target;
-        double price_difference = equity_difference / (total_volume * config_.contract_size + 0.0001);
+        double price_difference = equity_difference / (total_volume * cfg.contract_size + 0.0001);
 
         if (total_volume > 0 && (tick.ask - price_difference) >= end_price) {
             return 0.0; // Already at capacity
         }
 
         // Calculate available lot size using CFD leverage formula
-        double loss_from_existing = total_volume * distance * config_.contract_size;
+        double loss_from_existing = total_volume * distance * cfg.contract_size;
         double available_equity = equity - loss_from_existing - (config_.margin_stopout / 100.0) * used_margin;
 
         // Lot size that doesn't exceed margin limits
-        double margin_cost = (tick.ask * config_.contract_size) / config_.leverage;
-        double loss_cost = distance * config_.contract_size + spread_and_commission_ * config_.contract_size;
+        double margin_cost = (tick.ask * cfg.contract_size) / cfg.leverage;
+        double loss_cost = distance * cfg.contract_size + spread_and_commission_ * cfg.contract_size;
         double cost_per_lot = (config_.margin_stopout / 100.0) * margin_cost + loss_cost;
 
         double lot_size = available_equity / cost_per_lot;
 
-        // Normalize to min volume increments
-        lot_size = std::floor(lot_size / config_.min_volume) * config_.min_volume;
-        lot_size = std::min(lot_size, config_.max_volume);
+        // Normalize using engine's lot constraints
+        lot_size = engine.NormalizeLots(lot_size);
         lot_size = std::max(0.0, lot_size);
 
         return lot_size;
     }
 
     bool OpenBuy(double lot_size, const Tick& tick, TickBasedEngine& engine) {
-        if (lot_size < config_.min_volume) return false;
+        const auto& cfg = engine.GetConfig();
+        if (lot_size < cfg.volume_min) return false;
 
-        lot_size = std::min(lot_size, config_.max_volume);
-        // Round to 2 decimal places
-        lot_size = std::round(lot_size * 100.0) / 100.0;
+        lot_size = engine.NormalizeLots(lot_size);
+        if (lot_size < cfg.volume_min) return false;
 
         auto* trade = engine.OpenMarketOrder("BUY", lot_size);
         return trade != nullptr;

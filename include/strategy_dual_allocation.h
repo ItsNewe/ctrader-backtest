@@ -50,10 +50,6 @@ public:
         double extended_max_volume = 1.0;        // Cap extended position size
         int extended_max_positions = 5;          // Limit concurrent extended positions
 
-        // Shared settings
-        double contract_size = 100.0;
-        double leverage = 500.0;
-
         // Volatility adaptation
         double volatility_lookback_hours = 4.0;
         double typical_vol_pct = 0.55;
@@ -272,9 +268,9 @@ private:
         stats_.extended_allocation_used = 0.0;
 
         for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction != "BUY") continue;
+            if (!trade->IsBuy()) continue;
 
-            double margin_used = (trade->entry_price * config_.contract_size * trade->lot_size) / config_.leverage;
+            double margin_used = engine.CalculateMarginRequired(trade->lot_size, trade->entry_price);
 
             if (primary_trade_ids_.find(trade->id) != primary_trade_ids_.end()) {
                 primary_position_count_++;
@@ -297,7 +293,9 @@ private:
         }
     }
 
-    double CalculatePrimaryLotSize(const Tick& tick, double budget) {
+    double CalculatePrimaryLotSize(const Tick& tick, double budget, TickBasedEngine& engine) {
+        const auto& eng_config = engine.GetConfig();
+
         // Calculate survive distance in dollars based on current price
         double survive_distance = tick.ask * (config_.primary_survive_pct / 100.0);
 
@@ -306,23 +304,23 @@ private:
         // Use margin as proxy: margin = (price * contract_size * lots) / leverage
         // So lots = margin * leverage / (price * contract_size)
         if (tick.ask > 0) {
-            total_primary_volume = stats_.primary_allocation_used * config_.leverage /
-                                   (tick.ask * config_.contract_size);
+            total_primary_volume = stats_.primary_allocation_used * eng_config.leverage /
+                                   (tick.ask * eng_config.contract_size);
         }
 
         // Calculate potential loss if price drops by survive_distance
         // Loss = volume * price_drop * contract_size
-        double potential_loss = total_primary_volume * survive_distance * config_.contract_size;
+        double potential_loss = total_primary_volume * survive_distance * eng_config.contract_size;
 
         // Available equity for new positions (budget minus potential loss)
         double available = budget - potential_loss;
         if (available <= 0) return 0.0;
 
         // Calculate margin needed for one lot
-        double margin_per_lot = (tick.ask * config_.contract_size) / config_.leverage;
+        double margin_per_lot = engine.CalculateMarginRequired(1.0, tick.ask);
 
         // Calculate loss per lot if price drops by survive_distance
-        double loss_per_lot = survive_distance * config_.contract_size;
+        double loss_per_lot = survive_distance * eng_config.contract_size;
 
         // Maximum lots we can afford considering both margin and potential loss
         // New position will add to both margin requirement and potential loss exposure
@@ -333,15 +331,15 @@ private:
         // Apply limits
         lots = std::min(lots, config_.primary_max_volume);
         lots = std::max(lots, 0.0);
-        lots = std::floor(lots * 100) / 100;  // Round to 0.01
+        lots = engine.NormalizeLots(lots);
 
         if (lots < config_.primary_min_volume) return 0.0;
         return lots;
     }
 
-    double CalculateExtendedLotSize(const Tick& tick, double budget) {
+    double CalculateExtendedLotSize(const Tick& tick, double budget, TickBasedEngine& engine) {
         // Extended uses simpler sizing - just check if we have room in budget
-        double margin_per_lot = (tick.ask * config_.contract_size) / config_.leverage;
+        double margin_per_lot = engine.CalculateMarginRequired(1.0, tick.ask);
         double available = budget - stats_.extended_allocation_used;
 
         if (available < margin_per_lot * config_.extended_min_volume) return 0.0;
@@ -351,7 +349,7 @@ private:
     }
 
     void ExecutePrimary(const Tick& tick, TickBasedEngine& engine, double budget, double spread) {
-        double lot_size = CalculatePrimaryLotSize(tick, budget);
+        double lot_size = CalculatePrimaryLotSize(tick, budget, engine);
 
         // First position
         if (primary_position_count_ == 0) {
@@ -400,7 +398,7 @@ private:
         if (extended_position_count_ >= config_.extended_max_positions) return;
 
         // Check if we have budget
-        double lot_size = CalculateExtendedLotSize(tick, budget);
+        double lot_size = CalculateExtendedLotSize(tick, budget, engine);
         if (lot_size < config_.extended_min_volume) return;
 
         // Only trade when going down
@@ -429,11 +427,12 @@ private:
 
     void CloseExtendedOnReversal(const Tick& tick, TickBasedEngine& engine) {
         std::vector<Trade*> to_close;
+        double contract_size = engine.GetConfig().contract_size;
 
         for (Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY" &&
+            if (trade->IsBuy() &&
                 extended_trade_ids_.find(trade->id) != extended_trade_ids_.end()) {
-                double profit = (tick.bid - trade->entry_price) * trade->lot_size * config_.contract_size;
+                double profit = (tick.bid - trade->entry_price) * trade->lot_size * contract_size;
                 if (profit > 0) {
                     to_close.push_back(trade);
                 }
@@ -441,7 +440,7 @@ private:
         }
 
         for (Trade* trade : to_close) {
-            double profit = (tick.bid - trade->entry_price) * trade->lot_size * config_.contract_size;
+            double profit = (tick.bid - trade->entry_price) * trade->lot_size * contract_size;
             engine.ClosePosition(trade, "Extended reversal close");
             extended_trade_ids_.erase(trade->id);
             stats_.extended_profit += profit;

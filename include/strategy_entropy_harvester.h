@@ -33,8 +33,6 @@ public:
         double survive_pct = 13.0;            // Survive percentage for lot sizing
         double min_volume = 0.01;
         double max_volume = 10.0;
-        double contract_size = 100.0;
-        double leverage = 500.0;
         int reversal_window = 30;             // Ticks to detect reversal
         int direction_threshold = 8;          // Net up-ticks needed for "fast molecule"
         int max_positions = 50;               // Max open positions
@@ -172,12 +170,11 @@ private:
         double price_risk = config_.spacing * 5.0;  // Assume 5 levels of risk
         if (price_risk <= 0) return config_.min_volume;
 
-        double max_lots = survive_amount / (price_risk * config_.contract_size);
+        double max_lots = survive_amount / (price_risk * engine.GetConfig().contract_size);
         int open_count = (int)engine.GetOpenPositions().size();
         double lot_size = max_lots / std::max(1, 10 - open_count);
 
-        // Round to 0.01
-        lot_size = std::floor(lot_size * 100.0) / 100.0;
+        lot_size = engine.NormalizeLots(lot_size);
         return std::max(config_.min_volume, std::min(config_.max_volume, lot_size));
     }
 };

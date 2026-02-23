@@ -697,6 +697,10 @@ public:
     double GetHighestBuyEntry() const { return highest_buy_entry_; }
     double GetLowestBuyEntry() const { return lowest_buy_entry_; }
     size_t GetBuyPositionCount() const { return buy_position_count_; }
+    double GetSellVolume() const { return sell_volume_; }
+    double GetHighestSellEntry() const { return highest_sell_entry_; }
+    double GetLowestSellEntry() const { return lowest_sell_entry_; }
+    size_t GetSellPositionCount() const { return sell_position_count_; }
     /// @}
 
     // Get equity curve data
@@ -962,6 +966,10 @@ private:
     double highest_buy_entry_ = -1e308;
     double lowest_buy_entry_ = 1e308;
     size_t buy_position_count_ = 0;
+    double sell_volume_ = 0.0;
+    double highest_sell_entry_ = -1e308;
+    double lowest_sell_entry_ = 1e308;
+    size_t sell_position_count_ = 0;
 
     // Refresh SIMD cache when positions have changed
     void RefreshSimdCache() const {
@@ -1009,6 +1017,10 @@ private:
         highest_buy_entry_ = -1e308;
         lowest_buy_entry_ = 1e308;
         buy_position_count_ = 0;
+        sell_volume_ = 0.0;
+        highest_sell_entry_ = -1e308;
+        lowest_sell_entry_ = 1e308;
+        sell_position_count_ = 0;
 
         for (const Trade* trade : open_positions_) {
             if (trade->IsBuy()) {
@@ -1016,6 +1028,11 @@ private:
                 if (trade->entry_price > highest_buy_entry_) highest_buy_entry_ = trade->entry_price;
                 if (trade->entry_price < lowest_buy_entry_) lowest_buy_entry_ = trade->entry_price;
                 buy_position_count_++;
+            } else {
+                sell_volume_ += trade->lot_size;
+                if (trade->entry_price > highest_sell_entry_) highest_sell_entry_ = trade->entry_price;
+                if (trade->entry_price < lowest_sell_entry_) lowest_sell_entry_ = trade->entry_price;
+                sell_position_count_++;
             }
         }
     }

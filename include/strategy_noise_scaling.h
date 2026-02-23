@@ -51,7 +51,6 @@ public:
 
     StrategyNoiseScaling(double survive_pct, double base_spacing,
                          double min_volume, double max_volume,
-                         double contract_size, double leverage,
                          const NoiseConfig& noise_config = NoiseConfig())
         : survive_pct_(survive_pct),
           base_spacing_(base_spacing),

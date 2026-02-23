@@ -70,6 +70,9 @@ tmpclaude-*
 validation/tmpclaude-*
 nul
 
+# Ignore dashboard database and results
+results/*.db
+
 # Ignore temporary output files
 *.txt
 !README.txt

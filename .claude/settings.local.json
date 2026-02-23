@@ -43,7 +43,22 @@
       "Bash(mingw32-make:*)",
       "Bash(\"C:\\\\Users\\\\user\\\\.claude-worktrees\\\\ctrader-backtest\\\\condescending-liskov\\\\build\\\\test_strategy_minimal.exe\")",
       "Bash(./build/test_strategy_minimal.exe:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(dir:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(taskkill:*)",
+      "Bash(C:/Users/user/Documents/ctrader-backtest/build/validation/dashboard_cli.exe:*)",
+      "Bash(build/validation/dashboard_cli.exe:*)",
+      "Bash(npx tsc:*)",
+      "Bash(timeout:*)",
+      "Bash(npm run dev:*)",
+      "Bash(cmd /c \"cd /d C:\\\\Users\\\\user\\\\Documents\\\\ctrader-backtest\\\\dashboard && npm run dev\")",
+      "Bash(cmd /c start http://localhost:5173)",
+      "Bash(node -e:*)",
+      "Bash(cmd /c \"rmdir /s /q C:\\\\Users\\\\user\\\\Documents\\\\ctrader-backtest\\\\dashboard\\\\node_modules\\\\.vite\")"
     ]
   }
 }

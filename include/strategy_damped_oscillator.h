@@ -37,8 +37,6 @@ public:
         double tp_amplitude = 1.50;         // Expected oscillation amplitude for TP
         double lot_size = 0.02;             // Position size
         double max_lots = 0.30;             // Maximum total exposure
-        double contract_size = 100.0;
-        double leverage = 500.0;
         int cooldown_ticks = 100;           // Min ticks between entries
         int max_positions = 15;             // Max concurrent positions
         int warmup_ticks = 500;
@@ -176,9 +174,10 @@ private:
         auto positions = engine.GetOpenPositions();
         for (int i = (int)positions.size() - 1; i >= 0; i--) {
             Trade* t = positions[i];
-            if (t->direction == "BUY") {
-                double pnl = (tick.bid - t->entry_price) * t->lot_size * config_.contract_size;
-                double expected_max = config_.tp_amplitude * t->lot_size * config_.contract_size;
+            if (t->IsBuy()) {
+                double cs = engine.GetConfig().contract_size;
+                double pnl = (tick.bid - t->entry_price) * t->lot_size * cs;
+                double expected_max = config_.tp_amplitude * t->lot_size * cs;
                 // Harvest if captured significant portion of expected amplitude
                 if (pnl >= expected_max * config_.energy_harvest_ratio) {
                     engine.ClosePosition(t, "ENERGY_HARVEST");

@@ -62,15 +62,9 @@ public:
     /**
      * Constructor
      * @param grids Vector of grid configurations
-     * @param contract_size Contract size (100 for XAUUSD)
-     * @param leverage Account leverage
      */
-    StrategyFractalGrid(const std::vector<GridConfig>& grids,
-                        double contract_size = 100.0,
-                        double leverage = 500.0)
+    StrategyFractalGrid(const std::vector<GridConfig>& grids)
         : grids_(grids),
-          contract_size_(contract_size),
-          leverage_(leverage),
           current_ask_(0.0),
           current_bid_(0.0),
           current_spread_(0.0),
@@ -159,8 +153,6 @@ public:
 private:
     std::vector<GridConfig> grids_;
     std::vector<GridState> grid_states_;
-    double contract_size_;
-    double leverage_;
 
     double current_ask_;
     double current_bid_;
@@ -193,7 +185,7 @@ private:
                 if (grid_idx < grid_states_.size()) {
                     auto& state = grid_states_[grid_idx];
                     state.position_ids.push_back(trade->id);
-                    if (trade->direction == "BUY") {
+                    if (trade->IsBuy()) {
                         state.volume_open += trade->lot_size;
                         state.lowest_buy = std::min(state.lowest_buy, trade->entry_price);
                         state.highest_buy = std::max(state.highest_buy, trade->entry_price);
@@ -274,7 +266,7 @@ private:
         for (int trade_id : state.position_ids) {
             for (const Trade* trade : engine.GetOpenPositions()) {
                 if (trade->id == trade_id) {
-                    grid_used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
+                    grid_used_margin += engine.CalculateMarginRequired(trade->lot_size, trade->entry_price);
                     break;
                 }
             }
@@ -296,7 +288,8 @@ private:
         double margin_stop_out = 20.0;
 
         // Equity at target (worst case) for this grid's capital
-        double grid_equity_at_target = allocated_capital - state.volume_open * distance * contract_size_;
+        double contract_size = engine.GetConfig().contract_size;
+        double grid_equity_at_target = allocated_capital - state.volume_open * distance * contract_size;
 
         // Check if already at risk
         double margin_level_now = (grid_used_margin > 0)
@@ -309,9 +302,9 @@ private:
 
         // Calculate safe lot size
         double trade_size = config.min_lot;
-        double d_equity = contract_size_ * trade_size * spacing *
+        double d_equity = contract_size * trade_size * spacing *
                          (number_of_trades * (number_of_trades + 1) / 2);
-        double d_margin = number_of_trades * trade_size * contract_size_ / leverage_;
+        double d_margin = number_of_trades * engine.CalculateMarginRequired(trade_size, current_ask_);
 
         // Find maximum multiplier
         double max_mult = config.max_lot / config.min_lot;
@@ -327,7 +320,7 @@ private:
 
         // Apply lot constraints
         trade_size = std::max(config.min_lot, std::min(config.max_lot, trade_size));
-        trade_size = std::round(trade_size * 100.0) / 100.0;  // Round to 0.01
+        trade_size = engine.NormalizeLots(trade_size);
 
         return trade_size;
     }

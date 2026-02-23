@@ -47,10 +47,6 @@ public:
         // Base FillUp parameters
         double survive_pct;         // Max adverse price move to survive (%)
         double base_spacing;        // Grid spacing ($)
-        double min_volume;          // Min lot size per trade
-        double max_volume;          // Max lot size per trade
-        double contract_size;       // e.g., 100 for XAUUSD
-        double leverage;            // e.g., 500
 
         // Entropy export parameters
         ExportMode mode;
@@ -64,10 +60,6 @@ public:
         Config()
             : survive_pct(13.0),
               base_spacing(1.5),
-              min_volume(0.01),
-              max_volume(10.0),
-              contract_size(100.0),
-              leverage(500.0),
               mode(BASELINE),
               time_threshold_minutes(30.0),
               loss_threshold_dollars(5.0),
@@ -250,6 +242,7 @@ private:
     void CheckEntropyExport(TickBasedEngine& engine) {
         // Check each position for entropy export conditions
         double time_threshold_seconds = cfg_.time_threshold_minutes * 60.0;
+        const auto& ecfg = engine.GetConfig();
 
         std::vector<Trade*> to_close;
 
@@ -261,7 +254,7 @@ private:
             const PositionState& state = it->second;
 
             // Calculate current unrealized P/L (per position)
-            double unrealized_pnl = (current_bid_ - trade->entry_price) * trade->lot_size * cfg_.contract_size;
+            double unrealized_pnl = (current_bid_ - trade->entry_price) * trade->lot_size * ecfg.contract_size;
 
             // Only consider losers (unrealized_pnl < 0)
             if (unrealized_pnl >= 0) continue;
@@ -301,7 +294,7 @@ private:
             auto it = position_states_.find(trade->id);
             if (it != position_states_.end()) {
                 double hold_time = (double)(current_seconds_ - it->second.open_seconds);
-                double loss = (current_bid_ - trade->entry_price) * trade->lot_size * cfg_.contract_size;
+                double loss = (current_bid_ - trade->entry_price) * trade->lot_size * ecfg.contract_size;
 
                 stats_.trades_closed_entropy++;
                 stats_.total_loss_from_entropy += loss;  // Loss is negative
@@ -314,19 +307,15 @@ private:
     }
 
     void Iterate(TickBasedEngine& engine) {
-        lowest_buy_ = DBL_MAX;
-        highest_buy_ = DBL_MIN;
-        volume_of_open_trades_ = 0.0;
+        // Use engine aggregates instead of manual calculation
+        volume_of_open_trades_ = engine.GetBuyVolume();
+        lowest_buy_ = engine.GetLowestBuyEntry();
+        highest_buy_ = engine.GetHighestBuyEntry();
 
-        // Track current open position IDs
+        // Track current open position IDs (needed for entropy export TP detection)
         std::unordered_map<int, bool> open_ids;
         for (const Trade* trade : engine.GetOpenPositions()) {
             open_ids[trade->id] = true;
-            if (trade->direction == "BUY") {
-                volume_of_open_trades_ += trade->lot_size;
-                lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
-                highest_buy_ = std::max(highest_buy_, trade->entry_price);
-            }
         }
 
         // Track max concurrent positions
@@ -358,10 +347,8 @@ private:
     }
 
     double CalculateLotSize(TickBasedEngine& engine, int positions_total) {
-        double used_margin = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            used_margin += trade->lot_size * cfg_.contract_size * trade->entry_price / cfg_.leverage;
-        }
+        const auto& ecfg = engine.GetConfig();
+        double used_margin = engine.GetUsedMargin();
 
         double margin_stop_out = 20.0;
 
@@ -373,33 +360,33 @@ private:
         double number_of_trades = std::floor(distance / current_spacing_);
         if (number_of_trades <= 0) number_of_trades = 1;
 
-        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * cfg_.contract_size;
+        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * ecfg.contract_size;
         if (used_margin > 0 && (equity_at_target / used_margin * 100.0) < margin_stop_out) {
             return 0.0;
         }
 
-        double trade_size = cfg_.min_volume;
-        double d_equity = cfg_.contract_size * trade_size * current_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
-        double d_margin = number_of_trades * trade_size * cfg_.contract_size / cfg_.leverage;
+        double trade_size = ecfg.volume_min;
+        double d_equity = ecfg.contract_size * trade_size * current_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
+        double d_margin = number_of_trades * trade_size * ecfg.contract_size / ecfg.leverage;
 
-        double max_mult = cfg_.max_volume / cfg_.min_volume;
+        double max_mult = ecfg.volume_max / ecfg.volume_min;
         for (double mult = max_mult; mult >= 1.0; mult -= 0.1) {
             double test_equity = equity_at_target - mult * d_equity;
             double test_margin = used_margin + mult * d_margin;
             if (test_margin > 0 && (test_equity / test_margin * 100.0) > margin_stop_out) {
-                trade_size = mult * cfg_.min_volume;
+                trade_size = mult * ecfg.volume_min;
                 break;
             }
         }
 
-        return std::min(trade_size, cfg_.max_volume);
+        return std::min(trade_size, ecfg.volume_max);
     }
 
     bool Open(double lots, TickBasedEngine& engine) {
-        if (lots < cfg_.min_volume) return false;
+        const auto& ecfg = engine.GetConfig();
+        if (lots < ecfg.volume_min) return false;
 
-        double final_lots = std::min(lots, cfg_.max_volume);
-        final_lots = std::round(final_lots * 100.0) / 100.0;
+        double final_lots = engine.NormalizeLots(lots);
 
         double tp = current_ask_ + current_spread_ + current_spacing_;
 

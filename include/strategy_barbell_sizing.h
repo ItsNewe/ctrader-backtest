@@ -60,17 +60,11 @@ public:
     };
 
     StrategyBarbellSizing(double survive_pct, double base_spacing,
-                          double min_volume, double max_volume,
-                          double contract_size, double leverage,
                           double volatility_lookback_hours = 4.0,
                           BarbellConfig barbell_config = BarbellConfig(),
                           AdaptiveConfig adaptive_config = AdaptiveConfig())
         : survive_pct_(survive_pct),
           base_spacing_(base_spacing),
-          min_volume_(min_volume),
-          max_volume_(max_volume),
-          contract_size_(contract_size),
-          leverage_(leverage),
           volatility_lookback_hours_(volatility_lookback_hours),
           barbell_config_(barbell_config),
           adaptive_config_(adaptive_config),
@@ -149,10 +143,6 @@ private:
     // Base parameters
     double survive_pct_;
     double base_spacing_;
-    double min_volume_;
-    double max_volume_;
-    double contract_size_;
-    double leverage_;
     double volatility_lookback_hours_;
 
     // Barbell configuration
@@ -238,28 +228,12 @@ private:
     }
 
     void Iterate(TickBasedEngine& engine) {
-        lowest_buy_ = DBL_MAX;
-        highest_buy_ = DBL_MIN;
-        volume_of_open_trades_ = 0.0;
-        position_count_ = 0;
-
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
-                volume_of_open_trades_ += trade->lot_size;
-                lowest_buy_ = std::min(lowest_buy_, trade->entry_price);
-                highest_buy_ = std::max(highest_buy_, trade->entry_price);
-                position_count_++;
-            }
-        }
-
-        if (position_count_ > max_position_count_) {
-            max_position_count_ = position_count_;
-        }
-
-        // Reset reference when all positions close
-        if (position_count_ == 0) {
-            first_entry_price_ = 0.0;
-        }
+        volume_of_open_trades_ = engine.GetBuyVolume();
+        lowest_buy_ = engine.GetLowestBuyEntry();
+        highest_buy_ = engine.GetHighestBuyEntry();
+        position_count_ = (int)engine.GetBuyPositionCount();
+        if (position_count_ > max_position_count_) max_position_count_ = position_count_;
+        if (position_count_ == 0) first_entry_price_ = 0.0;
     }
 
     /**
@@ -267,10 +241,11 @@ private:
      *
      * The key insight: commit lightly early, commit heavily when extended
      */
-    double CalculateBarbellLotSize(int positions_total) {
+    double CalculateBarbellLotSize(int positions_total, TickBasedEngine& engine) {
+        const auto& cfg = engine.GetConfig();
         // Calculate base lot size using standard margin calculation
-        double base_lot = CalculateBaseLotSize(positions_total);
-        if (base_lot < min_volume_) return 0.0;
+        double base_lot = CalculateBaseLotSize(positions_total, engine);
+        if (base_lot < cfg.volume_min) return 0.0;
 
         // Apply barbell sizing based on mode
         double final_lot = base_lot;
@@ -292,10 +267,6 @@ private:
             case EXPONENTIAL: {
                 // Lot increases exponentially with deviation from first entry
                 // lot = base * (deviation_ratio ^ exponent)
-                // deviation_ratio = (survive_pct - current_deviation) / survive_pct
-                // When at 0% deviation: ratio = 1.0, lot = base
-                // When at 50% of survive: ratio = 0.5, lot = base * 0.5^exp (smaller)
-                // Wait, we want LARGER when deeper...
                 // So: ratio = 1 + (current_deviation / survive_pct)
                 // At 0% deviation: ratio = 1.0
                 // At survive/2: ratio = 1.5
@@ -323,16 +294,14 @@ private:
         }
 
         // Clamp to min/max
-        final_lot = std::max(min_volume_, std::min(max_volume_, final_lot));
+        final_lot = std::max(cfg.volume_min, std::min(cfg.volume_max, final_lot));
         return final_lot;
     }
 
-    double CalculateBaseLotSize(int positions_total) {
-        // Standard margin-aware lot sizing (from FillUpOscillation)
-        double used_margin = 0.0;
-        for (const Trade* trade : engine_ptr_->GetOpenPositions()) {
-            used_margin += trade->lot_size * contract_size_ * trade->entry_price / leverage_;
-        }
+    double CalculateBaseLotSize(int positions_total, TickBasedEngine& engine) {
+        const auto& cfg = engine.GetConfig();
+        // Use engine's SIMD-accelerated used margin
+        double used_margin = engine.GetUsedMargin();
 
         double margin_stop_out = 20.0;
 
@@ -344,36 +313,33 @@ private:
         double number_of_trades = std::floor(distance / current_spacing_);
         if (number_of_trades <= 0) number_of_trades = 1;
 
-        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * contract_size_;
+        double equity_at_target = current_equity_ - volume_of_open_trades_ * distance * cfg.contract_size;
         if (used_margin > 0 && (equity_at_target / used_margin * 100.0) < margin_stop_out) {
             return 0.0;
         }
 
-        double trade_size = min_volume_;
-        double d_equity = contract_size_ * trade_size * current_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
-        double d_margin = number_of_trades * trade_size * contract_size_ / leverage_;
+        double trade_size = cfg.volume_min;
+        double d_equity = cfg.contract_size * trade_size * current_spacing_ * (number_of_trades * (number_of_trades + 1) / 2);
+        double d_margin = number_of_trades * trade_size * cfg.contract_size / cfg.leverage;
 
-        double max_mult = max_volume_ / min_volume_;
+        double max_mult = cfg.volume_max / cfg.volume_min;
         for (double mult = max_mult; mult >= 1.0; mult -= 0.1) {
             double test_equity = equity_at_target - mult * d_equity;
             double test_margin = used_margin + mult * d_margin;
             if (test_margin > 0 && (test_equity / test_margin * 100.0) > margin_stop_out) {
-                trade_size = mult * min_volume_;
+                trade_size = mult * cfg.volume_min;
                 break;
             }
         }
 
-        return std::min(trade_size, max_volume_);
+        return std::min(trade_size, cfg.volume_max);
     }
 
-    // Store engine pointer for margin calculations
-    TickBasedEngine* engine_ptr_;
-
     bool Open(double lots, TickBasedEngine& engine) {
-        if (lots < min_volume_) return false;
+        const auto& cfg = engine.GetConfig();
+        if (lots < cfg.volume_min) return false;
 
-        double final_lots = std::min(lots, max_volume_);
-        final_lots = std::round(final_lots * 100.0) / 100.0;
+        double final_lots = engine.NormalizeLots(lots);
 
         double tp = current_ask_ + current_spread_ + current_spacing_;
         Trade* trade = engine.OpenMarketOrder("BUY", final_lots, 0.0, tp);
@@ -387,11 +353,10 @@ private:
     }
 
     void OpenNew(TickBasedEngine& engine) {
-        engine_ptr_ = &engine;  // Store for margin calculations
-        int positions_total = engine.GetOpenPositions().size();
+        int positions_total = position_count_;
 
         if (positions_total == 0) {
-            double lots = CalculateBarbellLotSize(positions_total);
+            double lots = CalculateBarbellLotSize(positions_total, engine);
             if (Open(lots, engine)) {
                 highest_buy_ = current_ask_;
                 lowest_buy_ = current_ask_;
@@ -399,12 +364,12 @@ private:
             }
         } else {
             if (lowest_buy_ >= current_ask_ + current_spacing_) {
-                double lots = CalculateBarbellLotSize(positions_total);
+                double lots = CalculateBarbellLotSize(positions_total, engine);
                 if (Open(lots, engine)) {
                     lowest_buy_ = current_ask_;
                 }
             } else if (highest_buy_ <= current_ask_ - current_spacing_) {
-                double lots = CalculateBarbellLotSize(positions_total);
+                double lots = CalculateBarbellLotSize(positions_total, engine);
                 if (Open(lots, engine)) {
                     highest_buy_ = current_ask_;
                 }

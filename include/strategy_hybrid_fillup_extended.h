@@ -41,8 +41,6 @@ public:
         double base_spacing = 1.50;              // Normal mode spacing
         double min_volume = 0.01;
         double max_volume = 10.0;
-        double contract_size = 100.0;
-        double leverage = 500.0;
 
         // Extended mode settings
         int extended_grid_levels = 3;            // How many levels in extended mode
@@ -235,7 +233,7 @@ private:
 
         // Count positions by type
         for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
+            if (trade->IsBuy()) {
                 bool is_extended = (extended_trade_ids_.find(trade->id) != extended_trade_ids_.end());
 
                 if (is_extended) {
@@ -258,30 +256,25 @@ private:
         double survive_distance = tick.ask * (config_.survive_pct / 100.0);
 
         // Calculate how much equity we'd lose if price drops by survive_distance
-        double total_volume = 0.0;
-        for (const Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY") {
-                total_volume += trade->lot_size;
-            }
-        }
+        double total_volume = engine.GetBuyVolume();
 
-        double potential_loss = total_volume * survive_distance * config_.contract_size;
+        double potential_loss = total_volume * survive_distance * engine.GetConfig().contract_size;
         double available_equity = equity - potential_loss;
 
         if (available_equity <= 0) return 0.0;
 
         // Calculate lot size based on available equity
-        double margin_per_lot = (tick.ask * config_.contract_size) / config_.leverage;
+        double margin_per_lot = engine.CalculateMarginRequired(1.0, tick.ask);
         double max_lots_by_margin = available_equity / margin_per_lot;
 
         // Limit by distance to survive
         double remaining_distance = (lowest_buy_ > tick.ask || lowest_buy_ >= DBL_MAX) ? 0 : tick.ask - lowest_buy_;
-        double expected_loss_per_lot = remaining_distance * config_.contract_size;
+        double expected_loss_per_lot = remaining_distance * engine.GetConfig().contract_size;
         double max_lots_by_loss = (available_equity * 0.5) / std::max(1.0, expected_loss_per_lot);
 
         double lot_size = std::min(max_lots_by_margin, max_lots_by_loss);
         lot_size = std::min(lot_size, config_.max_volume);
-        lot_size = std::floor(lot_size * 100) / 100;  // Round to 0.01
+        lot_size = engine.NormalizeLots(lot_size);
 
         return lot_size;
     }
@@ -400,11 +393,12 @@ private:
     void CloseExtendedPositions(const Tick& tick, TickBasedEngine& engine) {
         // Close extended positions that are in profit when direction reverses
         std::vector<Trade*> to_close;
+        double cs = engine.GetConfig().contract_size;
 
         for (Trade* trade : engine.GetOpenPositions()) {
-            if (trade->direction == "BUY" &&
+            if (trade->IsBuy() &&
                 extended_trade_ids_.find(trade->id) != extended_trade_ids_.end()) {
-                double profit = (tick.bid - trade->entry_price) * trade->lot_size * config_.contract_size;
+                double profit = (tick.bid - trade->entry_price) * trade->lot_size * cs;
                 if (profit > 0) {
                     to_close.push_back(trade);
                 }
@@ -412,7 +406,7 @@ private:
         }
 
         for (Trade* trade : to_close) {
-            double profit = (tick.bid - trade->entry_price) * trade->lot_size * config_.contract_size;
+            double profit = (tick.bid - trade->entry_price) * trade->lot_size * cs;
             engine.ClosePosition(trade, "Extended reversal");
             extended_trade_ids_.erase(trade->id);
             stats_.extended_exits++;

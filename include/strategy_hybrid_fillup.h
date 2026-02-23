@@ -4,13 +4,17 @@
  *
  * - Hybrid (Anti-Fragile) during uptrends: larger positions on dips
  * - Fill-Up (Grid with TP) during consolidation/crash: profit from oscillations
+ *
+ * Uses TickBasedEngine for all position/margin/balance management.
  */
 
-#include <vector>
+#include "tick_based_engine.h"
 #include <deque>
 #include <cmath>
 #include <algorithm>
-#include <string>
+#include <unordered_set>
+
+namespace backtest {
 
 enum class StrategyMode {
     HYBRID,   // Anti-fragile uptrend mode
@@ -48,103 +52,64 @@ struct HybridFillUpConfig {
     double uptrend_threshold = 0.5;
     int consolidation_ticks = 5000;
 
-    // Market
-    double leverage = 500.0;
-    double contract_size = 100.0;  // Gold
-    double spread = 0.25;
+    // Strategy-level stop-out
     double stop_out_level = 50.0;
 };
 
-struct HFPosition {
-    double entry_price;
-    double lots;
-    double take_profit;  // 0 = Hybrid position, >0 = FillUp position
-    bool is_hybrid;
-};
-
 struct HybridFillUpResult {
-    double final_equity;
-    double max_drawdown_pct;
-    double max_equity;
-    int hybrid_entries;
-    int fillup_entries;
-    int crash_exits;
-    int profit_takes;
-    int tp_hits;
-    int mode_changes;
-    double time_in_hybrid_pct;
-    double time_in_fillup_pct;
-    bool margin_call_occurred;
+    double final_equity = 0.0;
+    double max_drawdown_pct = 0.0;
+    double max_equity = 0.0;
+    int hybrid_entries = 0;
+    int fillup_entries = 0;
+    int crash_exits = 0;
+    int profit_takes = 0;
+    int tp_hits = 0;
+    int mode_changes = 0;
+    double time_in_hybrid_pct = 0.0;
+    double time_in_fillup_pct = 0.0;
+    bool margin_call_occurred = false;
 };
 
 class HybridFillUpStrategy {
 private:
     HybridFillUpConfig config_;
-    std::vector<HFPosition> positions_;
     std::deque<double> price_history_;
 
-    double balance_;
-    double initial_balance_;
-    double peak_equity_;
+    // Track which engine trade IDs are hybrid vs fillup
+    std::unordered_set<int> hybrid_trade_ids_;
 
     // State
-    StrategyMode current_mode_;
-    double all_time_high_;
-    double last_entry_price_;
-    int current_stress_level_;
-    int ticks_since_ath_;
+    StrategyMode current_mode_ = StrategyMode::HYBRID;
+    double all_time_high_ = 0.0;
+    double last_entry_price_ = 0.0;
+    int current_stress_level_ = 0;
+    int ticks_since_ath_ = 0;
 
     // Crash state
-    bool in_crash_mode_;
-    int crash_cooldown_;
-    double crash_low_;
+    bool in_crash_mode_ = false;
+    int crash_cooldown_ = 0;
+    double crash_low_ = 0.0;
 
-    // FillUp tracking
-    double lowest_buy_;
-    double highest_buy_;
+    // FillUp tracking (lowest/highest buy entry for spacing)
+    double lowest_buy_ = 1e9;
+    double highest_buy_ = 0.0;
 
     // Stats
-    long ticks_in_hybrid_;
-    long ticks_in_fillup_;
-    long total_ticks_;
+    long ticks_in_hybrid_ = 0;
+    long ticks_in_fillup_ = 0;
+    long total_ticks_ = 0;
 
     HybridFillUpResult result_;
 
 public:
-    void configure(const HybridFillUpConfig& cfg) {
-        config_ = cfg;
-    }
+    HybridFillUpStrategy() = default;
+    explicit HybridFillUpStrategy(const HybridFillUpConfig& cfg) : config_(cfg) {}
 
-    void reset(double starting_balance) {
-        positions_.clear();
-        price_history_.clear();
-        balance_ = starting_balance;
-        initial_balance_ = starting_balance;
-        peak_equity_ = starting_balance;
+    void configure(const HybridFillUpConfig& cfg) { config_ = cfg; }
 
-        current_mode_ = StrategyMode::HYBRID;
-        all_time_high_ = 0;
-        last_entry_price_ = 0;
-        current_stress_level_ = 0;
-        ticks_since_ath_ = 0;
-
-        in_crash_mode_ = false;
-        crash_cooldown_ = 0;
-        crash_low_ = 0;
-
-        lowest_buy_ = 1e9;
-        highest_buy_ = 0;
-
-        ticks_in_hybrid_ = 0;
-        ticks_in_fillup_ = 0;
-        total_ticks_ = 0;
-
-        result_ = HybridFillUpResult{};
-        result_.max_equity = starting_balance;
-    }
-
-    void on_tick(double bid, double ask) {
-        double mid = (bid + ask) / 2.0;
+    void OnTick(const Tick& tick, TickBasedEngine& engine) {
+        double mid = (tick.bid + tick.ask) / 2.0;
         total_ticks_++;
 
         // Update price history
@@ -155,7 +120,7 @@ public:
         }
 
         // Track ATH and stress
-        if (mid > all_time_high_ || all_time_high_ == 0) {
+        if (mid > all_time_high_ || all_time_high_ == 0.0) {
             all_time_high_ = mid;
             current_stress_level_ = 0;
             ticks_since_ath_ = 0;
@@ -165,23 +130,21 @@ public:
             ticks_since_ath_++;
         }
 
-        // Check margin
-        if (check_margin_stop_out(bid, ask)) {
-            return;
-        }
+        // Check margin stop-out
+        if (check_margin_stop_out(tick, engine)) return;
 
-        // Check TP hits for FillUp positions
-        check_tp_hits(bid);
+        // TP hits for FillUp positions are handled by engine automatically
+        // (we pass TP to OpenMarketOrder for fillup entries)
+        // But we need to clean up tracking when engine closes them
+        clean_stale_ids(engine);
 
         // Crash detection
         if (config_.enable_crash_detection) {
             update_crash_state(mid);
             if (!in_crash_mode_) {
-                check_crash_exit(bid, ask);
+                check_crash_exit(tick, engine);
             }
-            if (crash_cooldown_ > 0) {
-                crash_cooldown_--;
-            }
+            if (crash_cooldown_ > 0) crash_cooldown_--;
         }
 
         // Determine mode
@@ -196,37 +159,18 @@ public:
 
         // Execute based on mode
         if (current_mode_ == StrategyMode::HYBRID) {
-            execute_hybrid_mode(bid, ask);
+            execute_hybrid_mode(tick, engine);
         } else {
-            execute_fillup_mode(bid, ask);
+            execute_fillup_mode(tick, engine);
         }
 
         // Update stats
-        double equity = get_equity(bid, ask);
-        if (equity > result_.max_equity) {
-            result_.max_equity = equity;
-        }
-        if (equity > peak_equity_) {
-            peak_equity_ = equity;
-        }
-        if (peak_equity_ > 0) {
-            double dd = 100.0 * (peak_equity_ - equity) / peak_equity_;
-            if (dd > result_.max_drawdown_pct) {
-                result_.max_drawdown_pct = dd;
-            }
-        }
+        double equity = engine.GetEquity();
+        if (equity > result_.max_equity) result_.max_equity = equity;
     }
 
-    double get_equity(double bid, double ask) const {
-        double unrealized = 0;
-        for (const auto& pos : positions_) {
-            unrealized += (bid - pos.entry_price) * pos.lots * config_.contract_size;
-        }
-        return balance_ + unrealized;
-    }
-
-    HybridFillUpResult get_result(double bid, double ask) {
-        result_.final_equity = get_equity(bid, ask);
+    HybridFillUpResult get_result(const TickBasedEngine& engine) {
+        result_.final_equity = engine.GetEquity();
         if (total_ticks_ > 0) {
             result_.time_in_hybrid_pct = 100.0 * ticks_in_hybrid_ / total_ticks_;
             result_.time_in_fillup_pct = 100.0 * ticks_in_fillup_ / total_ticks_;
@@ -235,10 +179,26 @@ public:
     }
 
 private:
-    double calculate_velocity(int lookback) {
-        if (price_history_.size() < static_cast<size_t>(lookback)) {
-            return 0.0;
+    // Remove trade IDs that no longer exist in engine (closed by TP or other)
+    void clean_stale_ids(const TickBasedEngine& engine) {
+        const auto& positions = engine.GetOpenPositions();
+        std::unordered_set<int> active_ids;
+        for (const auto* trade : positions) {
+            active_ids.insert(trade->id);
         }
+        // Count TP hits: fillup trades that disappeared
+        for (auto it = hybrid_trade_ids_.begin(); it != hybrid_trade_ids_.end(); ) {
+            if (active_ids.find(*it) == active_ids.end()) {
+                it = hybrid_trade_ids_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        // Note: fillup TP hits are tracked by engine auto-closing TP
+    }
+
+    double calculate_velocity(int lookback) {
+        if (price_history_.size() < static_cast<size_t>(lookback)) return 0.0;
         double start_price = price_history_[price_history_.size() - lookback];
         double end_price = price_history_.back();
         if (start_price == 0) return 0.0;
@@ -249,27 +209,35 @@ private:
         if (in_crash_mode_) {
             if (mid < crash_low_) crash_low_ = mid;
             double bounce = (mid - crash_low_) / crash_low_ * 100.0;
-            if (bounce >= 0.5) {
-                in_crash_mode_ = false;
-            }
+            if (bounce >= 0.5) in_crash_mode_ = false;
         }
     }
 
-    void check_crash_exit(double bid, double ask) {
+    void check_crash_exit(const Tick& tick, TickBasedEngine& engine) {
         double velocity = calculate_velocity(config_.crash_lookback);
-
         if (velocity <= config_.crash_velocity) {
             in_crash_mode_ = true;
             crash_cooldown_ = config_.cooldown_after_crash;
-            crash_low_ = bid;
+            crash_low_ = tick.bid;
 
-            int pos_count = positions_.size();
+            size_t pos_count = engine.GetBuyPositionCount();
             int to_close = static_cast<int>(pos_count * config_.crash_exit_pct);
             if (to_close < 1 && pos_count > 0) to_close = 1;
 
-            for (int i = 0; i < to_close && !positions_.empty(); i++) {
-                close_worst_position(bid, ask);
-                result_.crash_exits++;
+            for (int i = 0; i < to_close; i++) {
+                // Close worst (most loss) position
+                Trade* worst = nullptr;
+                double worst_pnl = 1e9;
+                for (auto* trade : engine.GetOpenPositions()) {
+                    if (!trade->IsBuy()) continue;
+                    double pnl = tick.bid - trade->entry_price;
+                    if (pnl < worst_pnl) { worst_pnl = pnl; worst = trade; }
+                }
+                if (worst) {
+                    hybrid_trade_ids_.erase(worst->id);
+                    engine.ClosePosition(worst, "CRASH_EXIT");
+                    result_.crash_exits++;
+                }
             }
         }
     }
@@ -279,11 +247,9 @@ private:
 
         if (in_crash_mode_ || crash_cooldown_ > 0) {
             new_mode = StrategyMode::FILLUP;
-        }
-        else if (ticks_since_ath_ > config_.consolidation_ticks) {
+        } else if (ticks_since_ath_ > config_.consolidation_ticks) {
             new_mode = StrategyMode::FILLUP;
-        }
-        else {
+        } else {
             double trend = calculate_velocity(config_.trend_lookback);
             if (trend >= config_.uptrend_threshold) {
                 new_mode = StrategyMode::HYBRID;
@@ -298,255 +264,148 @@ private:
         }
     }
 
-    void execute_hybrid_mode(double bid, double ask) {
-        // Check profit taking
-        check_hybrid_profit_taking(bid, ask);
-
-        // Check entries
-        if (positions_.size() >= static_cast<size_t>(config_.max_positions)) return;
-
-        double entry_ref = (last_entry_price_ > 0) ? last_entry_price_ : all_time_high_;
-        if (entry_ref == 0) {
-            entry_ref = ask;
-            all_time_high_ = ask;
-        }
-
-        bool should_enter = false;
-
-        // Enter at ATH with no positions
-        if (ask >= all_time_high_ && positions_.empty()) {
-            should_enter = true;
-        }
-        // Enter on dip
-        else if (ask <= entry_ref - config_.hybrid_spacing) {
-            should_enter = true;
-        }
-
-        if (should_enter) {
-            double stress_mult = std::pow(1.0 + current_stress_level_, config_.hybrid_exponent);
-            double lot_size = config_.hybrid_base_lot * stress_mult;
-            lot_size = std::min(lot_size, config_.max_lot_size);
-
-            if (can_open_position(ask, lot_size)) {
-                open_position(ask, lot_size, 0, true);  // TP=0 for hybrid
-                last_entry_price_ = ask;
-                result_.hybrid_entries++;
-            }
-        }
-    }
-
-    void execute_fillup_mode(double bid, double ask) {
-        if (positions_.size() >= static_cast<size_t>(config_.max_positions)) return;
-
-        double lot_size = calculate_fillup_size(ask);
-        if (lot_size <= 0) return;
-
-        bool should_enter = false;
-
-        if (positions_.empty()) {
-            should_enter = true;
-        }
-        else if (lowest_buy_ < 1e8 && ask <= lowest_buy_ - config_.fillup_spacing) {
-            should_enter = true;
-        }
-        else if (highest_buy_ > 0 && ask >= highest_buy_ + config_.fillup_spacing) {
-            should_enter = true;
-        }
-
-        if (should_enter) {
-            double tp = 0;
-            if (config_.fillup_use_tp) {
-                tp = ask + config_.fillup_spacing + config_.spread;
-            }
-
-            if (can_open_position(ask, lot_size)) {
-                open_position(ask, lot_size, tp, false);
-                lowest_buy_ = std::min(lowest_buy_, ask);
-                highest_buy_ = std::max(highest_buy_, ask);
-                result_.fillup_entries++;
-            }
-        }
-    }
-
-    double calculate_fillup_size(double current_price) {
-        double equity = balance_;
-        for (const auto& pos : positions_) {
-            equity += (current_price - config_.spread - pos.entry_price) * pos.lots * config_.contract_size;
-        }
-
-        double ref_price = (highest_buy_ > 0) ? highest_buy_ : current_price;
-        double end_price = ref_price * (100 - config_.fillup_survive_down) / 100;
-        double distance = current_price - end_price;
-        double num_trades = std::floor(distance / config_.fillup_spacing);
-        if (num_trades < 1) num_trades = 1;
-
-        double available = equity * (1 - config_.max_equity_risk);
-        double per_trade = available / (num_trades * 2);
-
-        double lot_size = (per_trade * config_.leverage) / (config_.contract_size * current_price);
-        lot_size = lot_size * config_.fillup_size_mult;
-        lot_size = std::max(0.01, std::min(lot_size, config_.max_lot_size));
-
-        return lot_size;
-    }
-
-    void check_hybrid_profit_taking(double bid, double ask) {
-        double total_cost = 0, total_lots = 0;
-
-        for (const auto& pos : positions_) {
-            if (pos.is_hybrid) {
-                total_cost += pos.entry_price * pos.lots;
-                total_lots += pos.lots;
-            }
-        }
-
-        if (total_lots == 0) return;
-
-        double avg_entry = total_cost / total_lots;
-        double profit_pct = (bid - avg_entry) / avg_entry * 100.0;
-
-        if (profit_pct >= config_.hybrid_tp_pct) {
-            int hybrid_count = 0;
-            for (const auto& pos : positions_) {
-                if (pos.is_hybrid) hybrid_count++;
-            }
-
-            int to_close = static_cast<int>(hybrid_count * config_.hybrid_partial_pct);
-            if (to_close < 1) to_close = 1;
-
-            for (int i = 0; i < to_close; i++) {
-                close_best_hybrid_position(bid, ask);
-                result_.profit_takes++;
-            }
-        }
-    }
-
-    void check_tp_hits(double bid) {
-        std::vector<int> to_close;
-
-        for (size_t i = 0; i < positions_.size(); i++) {
-            if (!positions_[i].is_hybrid && positions_[i].take_profit > 0) {
-                if (bid >= positions_[i].take_profit) {
-                    to_close.push_back(i);
-                }
-            }
-        }
-
-        // Close in reverse order
-        for (int i = to_close.size() - 1; i >= 0; i--) {
-            close_position_at_tp(to_close[i], positions_[to_close[i]].take_profit);
-            result_.tp_hits++;
-        }
-    }
-
-    double get_used_margin(double ask) const {
-        double margin = 0;
-        for (const auto& pos : positions_) {
-            margin += pos.lots * config_.contract_size * ask / config_.leverage;
-        }
-        return margin;
-    }
-
-    bool check_margin_stop_out(double bid, double ask) {
-        if (positions_.empty()) return false;
-
-        double used = get_used_margin(ask);
-        double equity = get_equity(bid, ask);
-        double margin_level = (equity / used) * 100.0;
-
-        if (margin_level < config_.stop_out_level) {
+    bool check_margin_stop_out(const Tick& tick, TickBasedEngine& engine) {
+        if (engine.GetOpenPositions().empty()) return false;
+        double margin_level = engine.GetMarginLevel();
+        if (margin_level > 0 && margin_level < config_.stop_out_level) {
             result_.margin_call_occurred = true;
-            while (!positions_.empty()) {
-                close_position(0, bid);
+            auto positions = engine.GetOpenPositions();
+            for (auto* trade : positions) {
+                hybrid_trade_ids_.erase(trade->id);
+                engine.ClosePosition(trade, "STRATEGY_STOP_OUT");
             }
             return true;
         }
         return false;
     }
 
-    bool can_open_position(double price, double lots) {
-        double equity = get_equity(price - config_.spread, price);
-        double margin_needed = lots * config_.contract_size * price / config_.leverage;
-        double free_margin = equity - get_used_margin(price);
-        return margin_needed < free_margin * (1.0 - config_.max_equity_risk);
-    }
+    void execute_hybrid_mode(const Tick& tick, TickBasedEngine& engine) {
+        // Check profit taking on hybrid positions
+        check_hybrid_profit_taking(tick, engine);
 
-    void open_position(double price, double lots, double tp, bool is_hybrid) {
-        HFPosition pos;
-        pos.entry_price = price;
-        pos.lots = lots;
-        pos.take_profit = tp;
-        pos.is_hybrid = is_hybrid;
-        positions_.push_back(pos);
-    }
+        // Check entries
+        if (engine.GetBuyPositionCount() >= static_cast<size_t>(config_.max_positions)) return;
 
-    void close_position(int index, double bid) {
-        if (index < 0 || index >= static_cast<int>(positions_.size())) return;
+        double entry_ref = (last_entry_price_ > 0) ? last_entry_price_ : all_time_high_;
+        if (entry_ref == 0.0) { entry_ref = tick.ask; all_time_high_ = tick.ask; }
 
-        auto& pos = positions_[index];
-        double pnl = (bid - pos.entry_price) * pos.lots * config_.contract_size;
-        balance_ += pnl;
+        bool should_enter = false;
+        if (tick.ask >= all_time_high_ && engine.GetBuyPositionCount() == 0)
+            should_enter = true;
+        else if (tick.ask <= entry_ref - config_.hybrid_spacing)
+            should_enter = true;
 
-        // Update tracking
-        if (pos.entry_price == lowest_buy_) {
-            lowest_buy_ = 1e9;
-            for (const auto& p : positions_) {
-                if (&p != &pos) lowest_buy_ = std::min(lowest_buy_, p.entry_price);
-            }
-        }
-        if (pos.entry_price == highest_buy_) {
-            highest_buy_ = 0;
-            for (const auto& p : positions_) {
-                if (&p != &pos) highest_buy_ = std::max(highest_buy_, p.entry_price);
-            }
-        }
+        if (should_enter) {
+            double stress_mult = std::pow(1.0 + current_stress_level_, config_.hybrid_exponent);
+            double lot_size = std::min(config_.hybrid_base_lot * stress_mult, config_.max_lot_size);
+            lot_size = engine.NormalizeLots(lot_size);
 
-        positions_.erase(positions_.begin() + index);
-    }
-
-    void close_position_at_tp(int index, double tp_price) {
-        if (index < 0 || index >= static_cast<int>(positions_.size())) return;
-
-        auto& pos = positions_[index];
-        double pnl = (tp_price - pos.entry_price) * pos.lots * config_.contract_size;
-        balance_ += pnl;
-
-        positions_.erase(positions_.begin() + index);
-    }
-
-    void close_worst_position(double bid, double ask) {
-        int worst_idx = -1;
-        double worst_pnl = 1e9;
-
-        for (size_t i = 0; i < positions_.size(); i++) {
-            double pnl = bid - positions_[i].entry_price;
-            if (pnl < worst_pnl) {
-                worst_pnl = pnl;
-                worst_idx = i;
-            }
-        }
-
-        if (worst_idx >= 0) {
-            close_position(worst_idx, bid);
-        }
-    }
-
-    void close_best_hybrid_position(double bid, double ask) {
-        int best_idx = -1;
-        double best_pnl = -1e9;
-
-        for (size_t i = 0; i < positions_.size(); i++) {
-            if (positions_[i].is_hybrid) {
-                double pnl = bid - positions_[i].entry_price;
-                if (pnl > best_pnl) {
-                    best_pnl = pnl;
-                    best_idx = i;
+            double margin_needed = engine.CalculateMarginRequired(lot_size, tick.ask);
+            if (margin_needed < engine.GetFreeMargin() * (1.0 - config_.max_equity_risk)) {
+                Trade* trade = engine.OpenMarketOrder("BUY", lot_size);  // No TP for hybrid
+                if (trade) {
+                    hybrid_trade_ids_.insert(trade->id);
+                    last_entry_price_ = tick.ask;
+                    result_.hybrid_entries++;
                 }
             }
         }
+    }
 
-        if (best_idx >= 0) {
-            close_position(best_idx, bid);
+    void execute_fillup_mode(const Tick& tick, TickBasedEngine& engine) {
+        if (engine.GetBuyPositionCount() >= static_cast<size_t>(config_.max_positions)) return;
+
+        double lot_size = calculate_fillup_size(tick, engine);
+        if (lot_size <= 0) return;
+
+        // Use engine aggregates for spacing
+        double low = engine.GetLowestBuyEntry();
+        double high = engine.GetHighestBuyEntry();
+
+        bool should_enter = false;
+        if (engine.GetBuyPositionCount() == 0) {
+            should_enter = true;
+        } else if (low > 0 && tick.ask <= low - config_.fillup_spacing) {
+            should_enter = true;
+        } else if (high > 0 && tick.ask >= high + config_.fillup_spacing) {
+            should_enter = true;
+        }
+
+        if (should_enter) {
+            double tp = 0.0;
+            if (config_.fillup_use_tp) {
+                tp = tick.ask + config_.fillup_spacing + (tick.ask - tick.bid);  // spacing + spread
+            }
+
+            double margin_needed = engine.CalculateMarginRequired(lot_size, tick.ask);
+            if (margin_needed < engine.GetFreeMargin() * (1.0 - config_.max_equity_risk)) {
+                Trade* trade = engine.OpenMarketOrder("BUY", lot_size, 0.0, tp);
+                if (trade) {
+                    // NOT in hybrid_trade_ids_ -> it's a fillup trade
+                    result_.fillup_entries++;
+                }
+            }
+        }
+    }
+
+    double calculate_fillup_size(const Tick& tick, TickBasedEngine& engine) {
+        double equity = engine.GetEquity();
+        double high = engine.GetHighestBuyEntry();
+        double ref_price = (high > 0) ? high : tick.ask;
+        double end_price = ref_price * (100.0 - config_.fillup_survive_down) / 100.0;
+        double distance = tick.ask - end_price;
+        double num_trades = std::floor(distance / config_.fillup_spacing);
+        if (num_trades < 1) num_trades = 1;
+
+        double available = equity * (1.0 - config_.max_equity_risk);
+        double per_trade = available / (num_trades * 2.0);
+
+        double cs = engine.GetConfig().contract_size;
+        double lev = engine.GetConfig().leverage;
+        double lot_size = (per_trade * lev) / (cs * tick.ask);
+        lot_size *= config_.fillup_size_mult;
+        lot_size = engine.NormalizeLots(lot_size);
+        return lot_size;
+    }
+
+    void check_hybrid_profit_taking(const Tick& tick, TickBasedEngine& engine) {
+        // Calculate avg entry of hybrid positions only
+        double total_cost = 0.0, total_lots = 0.0;
+        int hybrid_count = 0;
+        for (const auto* trade : engine.GetOpenPositions()) {
+            if (!trade->IsBuy()) continue;
+            if (hybrid_trade_ids_.count(trade->id)) {
+                total_cost += trade->entry_price * trade->lot_size;
+                total_lots += trade->lot_size;
+                hybrid_count++;
+            }
+        }
+        if (total_lots == 0) return;
+
+        double avg_entry = total_cost / total_lots;
+        double profit_pct = (tick.bid - avg_entry) / avg_entry * 100.0;
+
+        if (profit_pct >= config_.hybrid_tp_pct) {
+            int to_close = static_cast<int>(hybrid_count * config_.hybrid_partial_pct);
+            if (to_close < 1) to_close = 1;
+
+            for (int i = 0; i < to_close; i++) {
+                Trade* best = nullptr;
+                double best_profit = -1e9;
+                for (auto* trade : engine.GetOpenPositions()) {
+                    if (!trade->IsBuy()) continue;
+                    if (!hybrid_trade_ids_.count(trade->id)) continue;
+                    double p = tick.bid - trade->entry_price;
+                    if (p > best_profit) { best_profit = p; best = trade; }
+                }
+                if (best) {
+                    hybrid_trade_ids_.erase(best->id);
+                    engine.ClosePosition(best, "HYBRID_PROFIT_TAKE");
+                    result_.profit_takes++;
+                }
+            }
         }
     }
 };
+
+} // namespace backtest

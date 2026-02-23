@@ -32,8 +32,6 @@ public:
         double harvest_profit = 0.50;       // $ profit per 0.01 lot to harvest
         double max_position_lots = 0.50;    // Maximum total lots
         double min_position_lots = 0.01;    // Minimum total lots
-        double contract_size = 100.0;
-        double leverage = 500.0;
         int lookback_ticks = 200;           // Ticks for volatility measurement
         int warmup_ticks = 500;             // Initial warmup
     };
@@ -75,10 +73,7 @@ public:
         double realized_vol = CalculateRealizedVol();
 
         // Calculate total long position
-        double total_longs = 0.0;
-        for (const Trade* t : engine.GetOpenPositions()) {
-            if (t->direction == "BUY") total_longs += t->lot_size;
-        }
+        double total_longs = engine.GetBuyVolume();
 
         // Gamma scalping logic
         double price_move = tick.bid - last_scalp_price_;
@@ -96,8 +91,8 @@ public:
                 Trade* best = nullptr;
                 double best_pnl = -1e9;
                 for (Trade* t : engine.GetOpenPositions()) {
-                    if (t->direction == "BUY" && t != engine.GetOpenPositions().front()) {
-                        double pnl = (tick.bid - t->entry_price) * t->lot_size * config_.contract_size;
+                    if (t->IsBuy() && t != engine.GetOpenPositions().front()) {
+                        double pnl = (tick.bid - t->entry_price) * t->lot_size * engine.GetConfig().contract_size;
                         if (pnl > best_pnl) {
                             best_pnl = pnl;
                             best = t;
@@ -159,8 +154,8 @@ private:
         auto positions = engine.GetOpenPositions();
         for (size_t i = 1; i < positions.size(); i++) {  // Skip base position (index 0)
             Trade* t = positions[i];
-            if (t->direction == "BUY") {
-                double pnl = (tick.bid - t->entry_price) * t->lot_size * config_.contract_size;
+            if (t->IsBuy()) {
+                double pnl = (tick.bid - t->entry_price) * t->lot_size * engine.GetConfig().contract_size;
                 double threshold = config_.harvest_profit * (t->lot_size / 0.01);
                 if (pnl >= threshold) {
                     engine.ClosePosition(t, "PROFIT_HARVEST");
