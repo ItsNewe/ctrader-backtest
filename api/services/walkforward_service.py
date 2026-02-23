@@ -181,7 +181,7 @@ async def start_walkforward(config: dict) -> str:
     }
 
     async def _run():
-        optimize_metric = config.get("optimize_metric", "return_percent")
+        optimize_metric = config.get("optimization_metric", config.get("optimize_metric", "return_percent"))
         results = []
 
         for i, window in enumerate(windows):

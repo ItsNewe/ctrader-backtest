@@ -67,11 +67,19 @@ def init_db():
                 full_result TEXT,      -- Full result JSON (without trades/equity for size)
                 equity_curve TEXT,     -- JSON array of equity values
                 equity_timestamps TEXT, -- JSON array of timestamps
+                trades_json TEXT,      -- JSON array of trade records (for Monte Carlo)
 
                 -- Metadata
                 notes TEXT DEFAULT ''
             )
         """)
+
+        # Add trades_json column if upgrading from old schema
+        try:
+            conn.execute("ALTER TABLE backtest_history ADD COLUMN trades_json TEXT")
+            logger.info("Added trades_json column to backtest_history")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_history_strategy ON backtest_history(strategy)
@@ -99,6 +107,10 @@ def save_result(result: Dict[str, Any], strategy_params: Optional[Dict] = None) 
         slim_result = {k: v for k, v in result.items()
                        if k not in ("trades", "equity_curve", "equity_timestamps")}
 
+        # Store trades for Monte Carlo / CSV export
+        trades = result.get("trades", [])
+        trades_json = json.dumps(trades) if trades else None
+
         row_id = conn.execute("""
             INSERT INTO backtest_history (
                 timestamp, strategy, symbol, start_date, end_date, initial_balance,
@@ -106,8 +118,8 @@ def save_result(result: Dict[str, Any], strategy_params: Optional[Dict] = None) 
                 sharpe_ratio, sortino_ratio, max_drawdown_pct, profit_factor,
                 recovery_factor, max_open_positions, stop_out_occurred,
                 strategy_params, broker_settings, full_result,
-                equity_curve, equity_timestamps
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                equity_curve, equity_timestamps, trades_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             time.time(),
             result.get("strategy", ""),
@@ -131,6 +143,7 @@ def save_result(result: Dict[str, Any], strategy_params: Optional[Dict] = None) 
             json.dumps(slim_result),
             json.dumps(result.get("equity_curve", [])),
             json.dumps(result.get("equity_timestamps", [])),
+            trades_json,
         )).lastrowid
 
         conn.commit()
@@ -219,12 +232,18 @@ def get_history_entry(entry_id: int) -> Optional[Dict[str, Any]]:
         entry["stop_out_occurred"] = bool(entry["stop_out_occurred"])
 
         # Parse JSON fields
-        for field in ("strategy_params", "broker_settings", "full_result", "equity_curve", "equity_timestamps"):
+        for field in ("strategy_params", "broker_settings", "full_result", "equity_curve", "equity_timestamps", "trades_json"):
             if entry.get(field):
                 try:
                     entry[field] = json.loads(entry[field])
                 except (json.JSONDecodeError, TypeError):
                     pass
+
+        # Make trades accessible at top level and in full_result for backward compat
+        trades = entry.get("trades_json") or []
+        entry["trades"] = trades
+        if isinstance(entry.get("full_result"), dict):
+            entry["full_result"]["trades"] = trades
 
         return entry
     finally:

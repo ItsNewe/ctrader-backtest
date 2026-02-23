@@ -90,18 +90,18 @@ def _run_monte_carlo(trades: list, initial_balance: float, num_simulations: int,
             "min_final": round(final_balances[0], 2),
             "max_final": round(final_balances[-1], 2),
             "std_dev": round((sum((b - sum(final_balances)/n)**2 for b in final_balances) / n) ** 0.5, 2),
-            "prob_profit": round(prob_profit, 1),
-            "prob_ruin": round(prob_ruin, 1),
-            "mean_max_drawdown": round(sum(max_drawdowns) / n, 1),
-            "median_max_drawdown": round(percentile(max_drawdowns, 50), 1),
-            "p95_max_drawdown": round(percentile(max_drawdowns, 95), 1),
-            "worst_max_drawdown": round(max_drawdowns[-1], 1),
+            # Frontend expects these exact field names
+            "prob_of_profit": round(prob_profit, 1),
+            "prob_of_ruin": round(prob_ruin, 1),
+            "mean_max_dd": round(sum(max_drawdowns) / n, 1),
+            "median_max_dd": round(percentile(max_drawdowns, 50), 1),
+            "p95_max_dd": round(percentile(max_drawdowns, 95), 1),
+            "worst_max_dd": round(max_drawdowns[-1], 1),
         },
-        "distribution": {
-            "final_balance_histogram": _histogram(final_balances, 30),
-            "max_drawdown_histogram": _histogram(max_drawdowns, 20),
-        },
-        "equity_curves_sample": equity_curves_sample,
+        # Frontend expects flat array of final balances for histogram rendering
+        "distribution": [round(b, 2) for b in final_balances],
+        # Frontend expects "sample_curves" key
+        "sample_curves": equity_curves_sample,
     }
 
 

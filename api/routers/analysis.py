@@ -139,20 +139,37 @@ async def get_risk_metrics(history_id: int):
     p95 = sorted_returns[int(0.95 * n)] if n > 20 else sorted_returns[-1]
     tail_ratio = round(abs(p95 / p5), 2) if p5 != 0 else 0
 
+    # Build time-indexed drawdown series for charts
+    dd_with_time = []
+    for i, dd in enumerate(drawdown_pct_series):
+        if i < len(timestamps) and timestamps[i]:
+            dd_with_time.append({"time": timestamps[i], "value": dd})
+
+    # Build time-indexed rolling sharpe series for charts
+    sharpe_with_time = []
+    for i, s in enumerate(rolling_sharpe):
+        ts_idx = i + window  # offset because rolling window starts later
+        if ts_idx < len(timestamps) and timestamps[ts_idx]:
+            sharpe_with_time.append({"time": timestamps[ts_idx], "value": s})
+
+    # Build monthly returns with month labels
+    months_labels = []
+    for i in range(len(monthly_returns)):
+        month_idx = i + 1
+        months_labels.append({"month": f"M{month_idx}", "return_pct": monthly_returns[i]})
+
+    # Return flat structure matching frontend RiskMetrics interface
     return {
         "status": "success",
-        "risk_metrics": {
-            "calmar_ratio": calmar,
-            "ulcer_index": ulcer_index,
-            "tail_ratio": tail_ratio,
-            "max_consecutive_losses": _max_consecutive(returns, lambda r: r < 0),
-            "max_consecutive_wins": _max_consecutive(returns, lambda r: r > 0),
-            "avg_drawdown_duration": _avg_drawdown_duration(drawdown_pct_series),
-        },
-        "drawdown_series": drawdown_pct_series,
-        "rolling_sharpe": rolling_sharpe,
-        "monthly_returns": monthly_returns,
-        "equity_timestamps": timestamps,
+        "calmar_ratio": calmar,
+        "ulcer_index": ulcer_index,
+        "tail_ratio": tail_ratio,
+        "max_consecutive_losses": _max_consecutive(returns, lambda r: r < 0),
+        "max_consecutive_wins": _max_consecutive(returns, lambda r: r > 0),
+        "avg_dd_duration_hours": _avg_drawdown_duration(drawdown_pct_series),
+        "drawdown_series": dd_with_time,
+        "rolling_sharpe": sharpe_with_time,
+        "monthly_returns": months_labels,
     }
 
 
@@ -199,10 +216,52 @@ async def api_start_walkforward(config: dict):
 @router.get("/walkforward/{wf_id}")
 async def api_walkforward_status(wf_id: str):
     """Get walk-forward analysis status and results."""
-    status = get_walkforward_status(wf_id)
-    if not status:
+    raw = get_walkforward_status(wf_id)
+    if not raw:
         return {"status": "error", "message": f"Walk-forward {wf_id} not found"}
-    return {"status": "ok", **status}
+
+    wf_status = raw.get("status", "running")
+
+    # Calculate progress percentage
+    total = raw.get("windows_total", 1)
+    completed = raw.get("windows_completed", 0)
+    progress_pct = round(completed / total * 100, 1) if total > 0 else 0
+
+    # Convert internal results to frontend-expected window format
+    windows = []
+    for i, r in enumerate(raw.get("results", [])):
+        w = r.get("window", {})
+        oos = r.get("out_sample_result") or {}
+        windows.append({
+            "window_index": i,
+            "is_start": w.get("in_sample_start", ""),
+            "is_end": w.get("in_sample_end", ""),
+            "oos_start": w.get("out_sample_start", ""),
+            "oos_end": w.get("out_sample_end", ""),
+            "best_params": r.get("in_sample_best_params") or {},
+            "is_score": r.get("in_sample_score", 0),
+            "oos_return": oos.get("return_percent", 0),
+            "oos_sharpe": oos.get("sharpe_ratio", 0),
+            "oos_max_dd": oos.get("max_drawdown_pct", 0),
+        })
+
+    # Build summary matching frontend interface
+    summary_raw = raw.get("summary", {})
+    summary = {
+        "avg_oos_return": summary_raw.get("avg_oos_return", 0),
+        "oos_win_rate": summary_raw.get("oos_win_rate", 0),
+        "best_oos_return": summary_raw.get("max_oos_return", 0),
+        "worst_oos_return": summary_raw.get("min_oos_return", 0),
+        "total_windows": summary_raw.get("total_windows", total),
+    }
+
+    return {
+        "status": wf_status,
+        "wf_id": wf_id,
+        "progress": progress_pct,
+        "windows": windows,
+        "summary": summary,
+    }
 
 
 # -- Monte Carlo ---------------------------------------------------------------
