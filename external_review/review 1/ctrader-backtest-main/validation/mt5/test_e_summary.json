@@ -1,9 +1,0 @@
-{
-  "test": "Test E - Swap Timing",
-  "symbol": "EURUSD",
-  "swap_events_detected": 2,
-  "duration_hours": 48,
-  "broker": " Pty Ltd",
-  "account": 000000,
-  "position_ticket": 2
-}
