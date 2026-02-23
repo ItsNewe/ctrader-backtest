@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+/* TradingView-style dark theme */
+@theme {
+  --color-bg-primary: #131722;
+  --color-bg-secondary: #1e222d;
+  --color-bg-tertiary: #2a2e39;
+  --color-border: #363a45;
+  --color-text-primary: #d1d4dc;
+  --color-text-secondary: #787b86;
+  --color-text-muted: #4c525e;
+  --color-accent: #2962ff;
+  --color-accent-hover: #1e53e5;
+  --color-success: #26a69a;
+  --color-danger: #ef5350;
+  --color-warning: #ff9800;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Select dropdown styling */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23787b86' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.25rem center;
+  background-repeat: no-repeat;
+  background-size: 1.25em 1.25em;
+  padding-right: 2rem;
+}
+
+select option {
+  background-color: #1e222d;
+  color: #d1d4dc;
+}
+
+/* Number input - hide spin buttons */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Table row hover animation */
+tbody tr {
+  transition: background-color 100ms ease;
+}
+
+/* Focus ring for accessibility */
+*:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
