@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from api.config import get_settings
-from api.routers import broker, backtest, strategies, data, sweep, browse
+from api.routers import broker, backtest, strategies, data, sweep, browse, analysis, commissions, versions
 
 # Configure logging
 logging.basicConfig(
@@ -63,6 +63,9 @@ app.include_router(strategies.router)
 app.include_router(data.router)
 app.include_router(sweep.router)
 app.include_router(browse.router)
+app.include_router(analysis.router)
+app.include_router(commissions.router)
+app.include_router(versions.router)
 
 
 # Health check

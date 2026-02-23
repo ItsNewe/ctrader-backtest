@@ -6,6 +6,9 @@ import { Sweep } from './pages/Sweep';
 import { History } from './pages/History';
 import { Compare } from './pages/Compare';
 import { Settings } from './pages/Settings';
+import { WalkForward } from './pages/WalkForward';
+import { MonteCarlo } from './pages/MonteCarlo';
+import { RiskDashboard } from './pages/RiskDashboard';
 import { useBroker } from './hooks/useBroker';
 
 function App() {
@@ -37,6 +40,12 @@ function App() {
         return <History />;
       case 'compare':
         return <Compare />;
+      case 'walkforward':
+        return <WalkForward />;
+      case 'montecarlo':
+        return <MonteCarlo />;
+      case 'risk':
+        return <RiskDashboard />;
       case 'settings':
         return <Settings />;
       default:

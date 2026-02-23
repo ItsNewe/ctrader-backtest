@@ -21,6 +21,10 @@ class BacktestConfig(BaseModel):
     # Tick data
     tick_file_path: Optional[str] = None
 
+    # Commission model
+    commission_per_lot: float = 0.0
+    commission_model: str = "fixed"  # "fixed", "tiered", "ecn_rebate"
+
     # Strategy-specific parameters
     strategy_params: dict = {}
 
@@ -100,3 +104,4 @@ class BacktestResult(BaseModel):
 
     # Error info
     message: Optional[str] = None
+    error_info: Optional[dict] = None  # Structured error details

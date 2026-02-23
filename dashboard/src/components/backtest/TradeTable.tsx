@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronUp, ChevronDown } from 'lucide-react';
+import { ChevronUp, ChevronDown, Download } from 'lucide-react';
 
 interface Trade {
   id: number;
@@ -21,10 +21,12 @@ export function TradeTable({
   trades,
   tradesTotal,
   truncated,
+  historyId,
 }: {
   trades: Trade[];
   tradesTotal: number;
   truncated: boolean;
+  historyId?: number;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('id');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -73,10 +75,21 @@ export function TradeTable({
         <span className="text-xs font-semibold text-[var(--color-text-primary)]">
           Trade History
         </span>
-        <span className="text-[10px] text-[var(--color-text-muted)]">
-          {trades.length} of {tradesTotal} trades
-          {truncated && ' (truncated)'}
-        </span>
+        <div className="flex items-center gap-2">
+          {historyId && (
+            <button
+              onClick={() => window.open(`http://localhost:8000/api/analysis/export/trades/${historyId}`, '_blank')}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-border)] transition-colors"
+            >
+              <Download size={10} />
+              Export CSV
+            </button>
+          )}
+          <span className="text-[10px] text-[var(--color-text-muted)]">
+            {trades.length} of {tradesTotal} trades
+            {truncated && ' (truncated)'}
+          </span>
+        </div>
       </div>
 
       <div className="overflow-x-auto">

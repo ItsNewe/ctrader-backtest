@@ -322,6 +322,57 @@ export function Compare() {
         </div>
       )}
 
+      {/* Statistical Analysis */}
+      {selectedEntries.length >= 2 && (
+        <div className="bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border)] overflow-hidden">
+          <div className="px-4 py-2 border-b border-[var(--color-border)]">
+            <span className="text-xs font-medium text-[var(--color-text-primary)]">Statistical Analysis</span>
+          </div>
+          <div className="p-4 space-y-3">
+            {/* Pairwise comparisons */}
+            {selectedEntries.map((a, i) =>
+              selectedEntries.slice(i + 1).map((b, j) => {
+                const retDiff = a.return_percent - b.return_percent;
+                const sharpeDiff = a.sharpe_ratio - b.sharpe_ratio;
+                const ddDiff = a.max_drawdown_pct - b.max_drawdown_pct;
+                const pfDiff = a.profit_factor - b.profit_factor;
+                // Calmar = annualized return / max DD
+                const calmarA = a.max_drawdown_pct > 0 ? a.return_percent / a.max_drawdown_pct : 0;
+                const calmarB = b.max_drawdown_pct > 0 ? b.return_percent / b.max_drawdown_pct : 0;
+                const calmarDiff = calmarA - calmarB;
+                // Risk-adjusted: Sharpe comparison
+                const betterOverall = sharpeDiff > 0 ? a : b;
+                const colorA = COMPARE_COLORS[i % COMPARE_COLORS.length];
+                const colorB = COMPARE_COLORS[(i + j + 1) % COMPARE_COLORS.length];
+
+                return (
+                  <div key={`${a.id}-${b.id}`} className="border border-[var(--color-border)] rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2 text-xs">
+                      <span className="font-medium" style={{ color: colorA }}>{a.strategy}</span>
+                      <span className="text-[var(--color-text-muted)]">vs</span>
+                      <span className="font-medium" style={{ color: colorB }}>{b.strategy}</span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-2 text-xs">
+                      <StatDiffCell label="Return" diff={retDiff} format={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`} higherBetter />
+                      <StatDiffCell label="Sharpe" diff={sharpeDiff} format={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`} higherBetter />
+                      <StatDiffCell label="Max DD" diff={ddDiff} format={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`} higherBetter={false} />
+                      <StatDiffCell label="Profit Factor" diff={pfDiff} format={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`} higherBetter />
+                      <StatDiffCell label="Calmar Ratio" diff={calmarDiff} format={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`} higherBetter />
+                    </div>
+                    <div className="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                      Risk-adjusted winner:{' '}
+                      <span className="text-[var(--color-accent)] font-medium">
+                        {betterOverall.strategy} ({betterOverall.symbol})
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
       {selected.size === 1 && (
         <div className="text-xs text-[var(--color-text-muted)] text-center py-4">
           Select at least 2 backtests to compare
@@ -353,6 +404,44 @@ const COMPARE_METRICS: MetricDef[] = [
   { key: 'max_open_positions', label: 'Max Positions', format: (v) => String(v) },
   { key: 'stop_out_occurred', label: 'Stop Out', format: (v) => v ? 'YES' : 'No' },
 ];
+
+function StatDiffCell({
+  label,
+  diff,
+  format,
+  higherBetter,
+}: {
+  label: string;
+  diff: number;
+  format: (v: number) => string;
+  higherBetter: boolean;
+}) {
+  const isGood = higherBetter ? diff > 0 : diff < 0;
+  const isNeutral = Math.abs(diff) < 0.001;
+  return (
+    <div className="bg-[var(--color-bg-tertiary)] rounded px-2 py-1.5">
+      <div className="text-[10px] text-[var(--color-text-muted)]">{label}</div>
+      <div className="flex items-center gap-1 mt-0.5">
+        {!isNeutral && (
+          <span
+            className="text-[10px]"
+            style={{ color: isGood ? 'var(--color-success)' : 'var(--color-danger)' }}
+          >
+            {isGood ? '\u2191' : '\u2193'}
+          </span>
+        )}
+        <span
+          className="text-xs font-mono"
+          style={{
+            color: isNeutral ? 'var(--color-text-muted)' : isGood ? 'var(--color-success)' : 'var(--color-danger)',
+          }}
+        >
+          {format(diff)}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function CompareRow({ metric, entries }: { metric: MetricDef; entries: HistoryEntry[] }) {
   const values = entries.map((e) => (e as Record<string, unknown>)[metric.key] as number);

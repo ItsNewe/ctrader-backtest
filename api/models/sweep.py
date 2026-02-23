@@ -11,6 +11,12 @@ class ParameterRange(BaseModel):
     step: float = 0.5
 
 
+class ConstraintRule(BaseModel):
+    """Constraint expression for sweep filtering. e.g. 'survive_pct + base_spacing < 20'"""
+    expression: str  # Python-evaluable expression using param names
+    description: str = ""  # Human-readable description
+
+
 class SweepConfig(BaseModel):
     strategy: str = "FillUpOscillation"
     symbol: str = "XAUUSD"
@@ -34,6 +40,12 @@ class SweepConfig(BaseModel):
 
     # Parameter ranges
     parameter_ranges: list[ParameterRange] = []
+
+    # Constraints (optional)
+    constraints: list[ConstraintRule] = []
+
+    # Multi-symbol (optional: run same strategy on multiple symbols)
+    symbols: list[str] = []  # If non-empty, overrides symbol field
 
 
 class SweepProgress(BaseModel):

@@ -92,6 +92,14 @@ export interface BacktestResult {
 
   // Error
   message?: string;
+
+  // Error details
+  error_info?: {
+    error_category: string;
+    message: string;
+    suggestion: string;
+    details: string;
+  };
 }
 
 export interface DataFile {

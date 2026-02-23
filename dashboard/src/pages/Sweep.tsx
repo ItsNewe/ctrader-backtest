@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Play, X, Grid3x3, Shuffle, ArrowUpDown, Trophy, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
+import { Play, X, Grid3x3, Shuffle, ArrowUpDown, Trophy, AlertTriangle, ChevronDown, ChevronRight, ShieldAlert } from 'lucide-react';
 import { useBacktest } from '../hooks/useBacktest';
 import { useBroker } from '../hooks/useBroker';
 import { useSweep } from '../hooks/useSweep';
 import { Heatmap } from '../components/sweep/Heatmap';
+import { apiPost } from '../api/client';
 import type { SweepConfig, SweepResultEntry, ParameterRange } from '../types/sweep';
 
 // Symbol default broker settings
@@ -27,6 +28,11 @@ export function Sweep() {
   const [showAdvancedRanges, setShowAdvancedRanges] = useState(false);
   const [sortBy, setSortBy] = useState('return_percent');
   const [sortAsc, setSortAsc] = useState(false);
+
+  // Validation guardrail state
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [estimatedTime, setEstimatedTime] = useState<string | null>(null);
 
   // Fetch strategies on mount
   useEffect(() => {
@@ -85,21 +91,53 @@ export function Sweep() {
     swap_short: spec?.swap_sell ?? brokerDefaults.swap_short,
   };
 
-  const handleStart = () => {
-    const config: SweepConfig = {
-      strategy: selectedStrategy || 'FillUpOscillation',
-      symbol,
-      start_date: startDate,
-      end_date: endDate,
-      initial_balance: balance,
-      ...brokerSettings,
-      sweep_type: sweepType,
-      num_combinations: numCombinations,
-      parameter_ranges: paramRanges
-        .filter((r) => r.min !== r.max || sweepType === 'random')
-        .map((r) => ({ name: r.name, min: r.min, max: r.max, step: r.step })),
-    };
+  const buildConfig = (): SweepConfig => ({
+    strategy: selectedStrategy || 'FillUpOscillation',
+    symbol,
+    start_date: startDate,
+    end_date: endDate,
+    initial_balance: balance,
+    ...brokerSettings,
+    sweep_type: sweepType,
+    num_combinations: numCombinations,
+    parameter_ranges: paramRanges
+      .filter((r) => r.min !== r.max || sweepType === 'random')
+      .map((r) => ({ name: r.name, min: r.min, max: r.max, step: r.step })),
+  });
+
+  const handleStart = async () => {
+    const config = buildConfig();
+
+    // Pre-validate
+    try {
+      const validation = await apiPost<{
+        status: string;
+        warnings: string[];
+        combination_count: number;
+        estimated_time?: string;
+      }>('/api/analysis/sweep/validate', config);
+
+      if (validation.warnings && validation.warnings.length > 0) {
+        setValidationWarnings(validation.warnings);
+        setEstimatedTime(validation.estimated_time || null);
+        setShowConfirmDialog(true);
+        return;
+      }
+
+      if (validation.estimated_time) {
+        setEstimatedTime(validation.estimated_time);
+      }
+    } catch {
+      // If validation endpoint doesn't exist, proceed anyway
+    }
+
     startSweep(config);
+  };
+
+  const handleConfirmStart = () => {
+    setShowConfirmDialog(false);
+    setValidationWarnings([]);
+    startSweep(buildConfig());
   };
 
   const updateRange = (idx: number, field: keyof ParameterRange, value: number | string) => {
@@ -301,6 +339,45 @@ export function Sweep() {
           </div>
         </div>
       </div>
+
+      {/* Sweep Validation Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-warning)]/50 p-4 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-warning)]">
+            <ShieldAlert size={14} />
+            Sweep Validation Warnings
+          </div>
+          <div className="space-y-1">
+            {validationWarnings.map((w, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs text-[var(--color-text-secondary)]">
+                <AlertTriangle size={10} className="text-[var(--color-warning)] mt-0.5 shrink-0" />
+                {w}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-[10px] text-[var(--color-text-muted)]">
+              {comboCount.toLocaleString()} combinations
+              {estimatedTime && <> | Est. {estimatedTime}</>}
+            </div>
+            <div className="flex gap-2 ml-auto">
+              <button
+                onClick={() => setShowConfirmDialog(false)}
+                className="px-3 py-1 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmStart}
+                className="flex items-center gap-1 px-3 py-1 rounded text-xs font-medium bg-[var(--color-warning)] text-black hover:bg-[var(--color-warning)]/80 transition-colors"
+              >
+                <Play size={12} />
+                Proceed Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Error */}
       {error && (

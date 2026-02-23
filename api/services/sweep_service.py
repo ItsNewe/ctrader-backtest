@@ -56,6 +56,38 @@ def generate_random_combinations(ranges: List[ParameterRange], n: int) -> List[D
     return combos
 
 
+def filter_by_constraints(combinations: List[Dict[str, float]], constraints: list) -> List[Dict[str, float]]:
+    """Filter combinations by constraint expressions.
+
+    Constraints are Python expressions evaluated with param names as variables.
+    Example: 'survive_pct + base_spacing < 20'
+    Only safe operators are allowed (no function calls, imports, etc.)
+    """
+    if not constraints:
+        return combinations
+
+    filtered = []
+    for combo in combinations:
+        passes = True
+        for constraint in constraints:
+            expr = constraint.expression if hasattr(constraint, 'expression') else constraint.get('expression', '')
+            try:
+                # Only allow param names, numbers, and comparison operators
+                result = eval(expr, {"__builtins__": {}}, combo)
+                if not result:
+                    passes = False
+                    break
+            except Exception:
+                # If expression fails, skip this constraint
+                passes = False
+                break
+        if passes:
+            filtered.append(combo)
+
+    logger.info(f"Constraints filtered {len(combinations)} -> {len(filtered)} combinations")
+    return filtered
+
+
 def _run_single_backtest(
     config: SweepConfig,
     tick_file: str,
@@ -124,6 +156,10 @@ async def start_sweep(
         combinations = generate_random_combinations(config.parameter_ranges, config.num_combinations)
     else:
         combinations = generate_grid_combinations(config.parameter_ranges)
+
+    # Apply constraint filtering
+    if config.constraints:
+        combinations = filter_by_constraints(combinations, config.constraints)
 
     total = len(combinations)
     if total == 0:

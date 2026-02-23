@@ -1,0 +1,78 @@
+name: CI — Dashboard Build & Type Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+      - 'api/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+      - 'api/**'
+
+jobs:
+  dashboard-build:
+    name: Dashboard — Lint, Type Check, Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: TypeScript type check
+        working-directory: dashboard
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        working-directory: dashboard
+        run: npm run lint
+
+      - name: Build production bundle
+        working-directory: dashboard
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: dashboard/dist/
+          retention-days: 7
+
+  api-check:
+    name: API — Python Lint & Import Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install fastapi pydantic pydantic-settings uvicorn
+
+      - name: Verify API imports
+        run: |
+          python -c "from api.main import app; print(f'Routes: {len(app.routes)}')"
+
+      - name: Check for syntax errors
+        run: |
+          python -m py_compile api/main.py
+          python -m py_compile api/config.py
+          find api -name '*.py' -exec python -m py_compile {} +

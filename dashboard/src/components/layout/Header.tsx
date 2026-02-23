@@ -1,4 +1,4 @@
-import { Activity, Settings, TrendingUp, Grid3x3, Clock, GitCompare } from 'lucide-react';
+import { Activity, Settings, TrendingUp, Grid3x3, Clock, GitCompare, BarChart3, Dice5, Shield } from 'lucide-react';
 import { useBroker } from '../../hooks/useBroker';
 
 interface HeaderProps {
@@ -15,6 +15,9 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
     { id: 'sweep', label: 'Sweep', icon: Grid3x3 },
     { id: 'history', label: 'History', icon: Clock },
     { id: 'compare', label: 'Compare', icon: GitCompare },
+    { id: 'walkforward', label: 'WF Analysis', icon: BarChart3 },
+    { id: 'montecarlo', label: 'Monte Carlo', icon: Dice5 },
+    { id: 'risk', label: 'Risk', icon: Shield },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
