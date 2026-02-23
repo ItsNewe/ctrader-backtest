@@ -6,7 +6,7 @@ interface StrategyVersion {
   id: number;
   name: string;
   notes: string;
-  timestamp: number;
+  created_at: number;
   params: Record<string, number | string | boolean>;
 }
 
@@ -148,7 +148,7 @@ export function VersionManager({ strategyId, currentParams, onLoadVersion }: Ver
                   <span className="text-[10px] text-[var(--color-text-muted)] truncate max-w-[100px]">{v.notes}</span>
                 )}
               </div>
-              <span className="text-[9px] text-[var(--color-text-muted)]">{formatDate(v.timestamp)}</span>
+              <span className="text-[9px] text-[var(--color-text-muted)]">{formatDate(v.created_at)}</span>
             </button>
           ))}
         </div>

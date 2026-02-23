@@ -474,15 +474,15 @@ function SweepProgressBar({ progress }: { progress: import('../types/sweep').Swe
 // ── Results Table Component ────────────────────────────────
 
 const COLUMNS = [
-  { key: 'return_percent', label: 'Return %', format: (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` },
-  { key: 'final_balance', label: 'Balance', format: (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}` },
-  { key: 'sharpe_ratio', label: 'Sharpe', format: (v: number) => v.toFixed(2) },
-  { key: 'sortino_ratio', label: 'Sortino', format: (v: number) => v.toFixed(2) },
-  { key: 'max_drawdown', label: 'Max DD%', format: (v: number) => `${v.toFixed(1)}%` },
-  { key: 'profit_factor', label: 'PF', format: (v: number) => v.toFixed(2) },
-  { key: 'win_rate', label: 'Win%', format: (v: number) => `${v.toFixed(1)}%` },
-  { key: 'total_trades', label: 'Trades', format: (v: number) => v.toLocaleString() },
-  { key: 'recovery_factor', label: 'RF', format: (v: number) => v.toFixed(2) },
+  { key: 'return_percent', label: 'Return %', format: (v: number) => `${(v ?? 0) >= 0 ? '+' : ''}${(v ?? 0).toFixed(1)}%` },
+  { key: 'final_balance', label: 'Balance', format: (v: number) => `$${(v ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}` },
+  { key: 'sharpe_ratio', label: 'Sharpe', format: (v: number) => (v ?? 0).toFixed(2) },
+  { key: 'sortino_ratio', label: 'Sortino', format: (v: number) => (v ?? 0).toFixed(2) },
+  { key: 'max_drawdown', label: 'Max DD%', format: (v: number) => `${(v ?? 0).toFixed(1)}%` },
+  { key: 'profit_factor', label: 'PF', format: (v: number) => (v ?? 0).toFixed(2) },
+  { key: 'win_rate', label: 'Win%', format: (v: number) => `${(v ?? 0).toFixed(1)}%` },
+  { key: 'total_trades', label: 'Trades', format: (v: number) => (v ?? 0).toLocaleString() },
+  { key: 'recovery_factor', label: 'RF', format: (v: number) => (v ?? 0).toFixed(2) },
   { key: 'stop_out', label: 'StopOut', format: (v: boolean) => v ? 'YES' : '-' },
 ];
 

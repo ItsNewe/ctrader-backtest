@@ -5,7 +5,7 @@ import { apiGet } from '../api/client';
 interface CommissionPreset {
   id: string;
   name: string;
-  commission_per_lot: number;
+  per_lot: number;
   description?: string;
 }
 
@@ -21,7 +21,7 @@ export function CommissionSelector({ value, onChange }: CommissionSelectorProps)
   useEffect(() => {
     apiGet<{ status: string; presets: CommissionPreset[] }>('/api/commissions')
       .then((res) => {
-        if (res.status === 'ok' || res.presets) {
+        if ((res.status === 'ok' || res.presets) && Array.isArray(res.presets)) {
           setPresets(res.presets);
         }
       })
@@ -32,7 +32,7 @@ export function CommissionSelector({ value, onChange }: CommissionSelectorProps)
     setSelectedPreset(presetId);
     const preset = presets.find((p) => p.id === presetId);
     if (preset) {
-      onChange(preset.commission_per_lot);
+      onChange(preset.per_lot);
     }
   };
 
@@ -51,7 +51,7 @@ export function CommissionSelector({ value, onChange }: CommissionSelectorProps)
           <option value="">Custom</option>
           {presets.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} (${p.commission_per_lot}/lot)
+              {p.name} (${p.per_lot}/lot)
             </option>
           ))}
         </select>
