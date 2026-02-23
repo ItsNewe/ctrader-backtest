@@ -94,18 +94,25 @@ export function MonteCarlo() {
     const w = rect.width;
     const h = rect.height;
     const dist = result.distribution;
+    if (dist.length === 0) return;
 
     // Build histogram bins
     const numBins = 40;
     const min = Math.min(...dist);
     const max = Math.max(...dist);
-    const binWidth = (max - min) / numBins || 1;
+    const range = max - min;
+    const binWidth = range > 0 ? range / numBins : 1;
     const bins = new Array(numBins).fill(0);
-    for (const v of dist) {
-      const idx = Math.min(Math.floor((v - min) / binWidth), numBins - 1);
-      bins[idx]++;
+    if (range > 0) {
+      for (const v of dist) {
+        const idx = Math.min(Math.floor((v - min) / binWidth), numBins - 1);
+        bins[idx]++;
+      }
+    } else {
+      // All values identical — put everything in the middle bin
+      bins[Math.floor(numBins / 2)] = dist.length;
     }
-    const maxCount = Math.max(...bins);
+    const maxCount = Math.max(...bins, 1);
 
     const padding = { top: 10, right: 10, bottom: 30, left: 50 };
     const chartW = w - padding.left - padding.right;
@@ -146,22 +153,30 @@ export function MonteCarlo() {
       ctx.fillText(String(Math.round(val)), padding.left - 5, y + 3);
     }
 
-    // Mean line
-    const meanX = padding.left + ((result.statistics.mean_final - min) / (max - min)) * chartW;
-    ctx.strokeStyle = '#2962FF';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(meanX, padding.top);
-    ctx.lineTo(meanX, padding.top + chartH);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Mean line (only draw if there's a range)
+    if (range > 0) {
+      const meanX = padding.left + ((result.statistics.mean_final - min) / range) * chartW;
+      ctx.strokeStyle = '#2962FF';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(meanX, padding.top);
+      ctx.lineTo(meanX, padding.top + chartH);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-    // Mean label
-    ctx.fillStyle = '#2962FF';
-    ctx.font = '9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Mean', meanX, padding.top - 2);
+      // Mean label
+      ctx.fillStyle = '#2962FF';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Mean', meanX, padding.top - 2);
+    } else {
+      // All simulations identical — show centered label
+      ctx.fillStyle = '#2962FF';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`All sims: $${(min / 1000).toFixed(1)}k`, w / 2, padding.top + 15);
+    }
   }, [result]);
 
   // Draw fan chart
@@ -195,7 +210,7 @@ export function MonteCarlo() {
         if (v > allMax) allMax = v;
       }
     }
-    const range = allMax - allMin || 1;
+    const range = allMax - allMin || (allMax * 0.1) || 1;
 
     // Clear
     ctx.fillStyle = '#131722';
@@ -318,16 +333,16 @@ export function MonteCarlo() {
         <>
           {/* Statistics cards */}
           <div className="grid grid-cols-4 gap-3">
-            <StatCard label="Mean Final" value={`$${result.statistics.mean_final.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-            <StatCard label="Median Final" value={`$${result.statistics.median_final.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-            <StatCard label="P5 Final" value={`$${result.statistics.p5_final.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="var(--color-danger)" />
-            <StatCard label="P95 Final" value={`$${result.statistics.p95_final.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="var(--color-success)" />
+            <StatCard label="Mean Final" value={`$${(result.statistics.mean_final ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+            <StatCard label="Median Final" value={`$${(result.statistics.median_final ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+            <StatCard label="P5 Final" value={`$${(result.statistics.p5_final ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="var(--color-danger)" />
+            <StatCard label="P95 Final" value={`$${(result.statistics.p95_final ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="var(--color-success)" />
           </div>
           <div className="grid grid-cols-4 gap-3">
-            <StatCard label="Prob of Profit" value={`${result.statistics.prob_of_profit.toFixed(1)}%`} color={result.statistics.prob_of_profit >= 50 ? 'var(--color-success)' : 'var(--color-danger)'} />
-            <StatCard label="Prob of Ruin" value={`${result.statistics.prob_of_ruin.toFixed(1)}%`} color={result.statistics.prob_of_ruin <= 10 ? 'var(--color-success)' : 'var(--color-danger)'} />
-            <StatCard label="Mean Max DD" value={`${result.statistics.mean_max_dd.toFixed(1)}%`} color={result.statistics.mean_max_dd <= 50 ? 'var(--color-text-primary)' : 'var(--color-danger)'} />
-            <StatCard label="P95 Max DD" value={`${result.statistics.p95_max_dd.toFixed(1)}%`} color={result.statistics.p95_max_dd <= 70 ? 'var(--color-warning)' : 'var(--color-danger)'} />
+            <StatCard label="Prob of Profit" value={`${(result.statistics.prob_of_profit ?? 0).toFixed(1)}%`} color={(result.statistics.prob_of_profit ?? 0) >= 50 ? 'var(--color-success)' : 'var(--color-danger)'} />
+            <StatCard label="Prob of Ruin" value={`${(result.statistics.prob_of_ruin ?? 0).toFixed(1)}%`} color={(result.statistics.prob_of_ruin ?? 0) <= 10 ? 'var(--color-success)' : 'var(--color-danger)'} />
+            <StatCard label="Mean Max DD" value={`${(result.statistics.mean_max_dd ?? 0).toFixed(1)}%`} color={(result.statistics.mean_max_dd ?? 0) <= 50 ? 'var(--color-text-primary)' : 'var(--color-danger)'} />
+            <StatCard label="P95 Max DD" value={`${(result.statistics.p95_max_dd ?? 0).toFixed(1)}%`} color={(result.statistics.p95_max_dd ?? 0) <= 70 ? 'var(--color-warning)' : 'var(--color-danger)'} />
           </div>
 
           {/* Histogram */}

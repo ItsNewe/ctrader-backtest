@@ -101,10 +101,10 @@ export function Dashboard() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="font-mono" style={{ color: isProfit ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                        {isProfit ? '+' : ''}{entry.return_percent.toFixed(1)}%
+                        {isProfit ? '+' : ''}{(entry.return_percent ?? 0).toFixed(1)}%
                       </span>
-                      <span className="text-[var(--color-text-muted)] font-mono">S:{entry.sharpe_ratio.toFixed(1)}</span>
-                      <span className="text-[var(--color-text-muted)] font-mono">DD:{entry.max_drawdown_pct.toFixed(0)}%</span>
+                      <span className="text-[var(--color-text-muted)] font-mono">S:{(entry.sharpe_ratio ?? 0).toFixed(1)}</span>
+                      <span className="text-[var(--color-text-muted)] font-mono">DD:{(entry.max_drawdown_pct ?? 0).toFixed(0)}%</span>
                       <span className="text-[var(--color-text-muted)] text-[10px]">{formatDate(entry.timestamp)}</span>
                     </div>
                   </div>
@@ -155,7 +155,7 @@ export function Dashboard() {
                 className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-bg-tertiary)] text-xs"
               >
                 <span className="font-mono text-[var(--color-text-secondary)] truncate">{f.symbol || f.name}</span>
-                <span className="text-[var(--color-text-muted)] text-[10px] shrink-0 ml-2">{f.size_mb.toFixed(0)} MB</span>
+                <span className="text-[var(--color-text-muted)] text-[10px] shrink-0 ml-2">{(f.size_mb ?? 0).toFixed(0)} MB</span>
               </div>
             ))}
             {dataFiles.length > 12 && (

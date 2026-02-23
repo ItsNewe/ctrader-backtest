@@ -126,19 +126,19 @@ export function TradeTable({
                   {t.entry_time}
                 </td>
                 <td className="px-2 py-1 text-[var(--color-text-primary)] font-mono">
-                  {t.entry_price.toFixed(5)}
+                  {(t.entry_price ?? 0).toFixed(5)}
                 </td>
                 <td className="px-2 py-1 text-[var(--color-text-primary)] font-mono">
-                  {t.exit_price.toFixed(5)}
+                  {(t.exit_price ?? 0).toFixed(5)}
                 </td>
                 <td className="px-2 py-1 text-[var(--color-text-secondary)] font-mono">
-                  {t.lot_size.toFixed(2)}
+                  {(t.lot_size ?? 0).toFixed(2)}
                 </td>
                 <td className="px-2 py-1 font-mono font-medium">
                   <span
-                    className={t.profit_loss >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}
+                    className={(t.profit_loss ?? 0) >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}
                   >
-                    {t.profit_loss >= 0 ? '+' : ''}${t.profit_loss.toFixed(2)}
+                    {(t.profit_loss ?? 0) >= 0 ? '+' : ''}${(t.profit_loss ?? 0).toFixed(2)}
                   </span>
                 </td>
                 <td className="px-2 py-1 text-[var(--color-text-muted)]">{t.exit_reason}</td>

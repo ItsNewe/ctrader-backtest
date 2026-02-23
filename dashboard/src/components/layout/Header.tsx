@@ -51,7 +51,7 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
       <div className="flex items-center gap-3 text-xs">
         {accountInfo && (
           <span className="text-[var(--color-text-secondary)]">
-            Balance: ${accountInfo.balance.toLocaleString()}
+            Balance: ${(accountInfo.balance ?? 0).toLocaleString()}
           </span>
         )}
         <div className="flex items-center gap-1.5">

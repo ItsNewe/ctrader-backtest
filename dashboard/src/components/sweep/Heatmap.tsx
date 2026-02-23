@@ -115,7 +115,8 @@ export function Heatmap({ results }: HeatmapProps) {
     ctx.fillStyle = '#131722';
     ctx.fillRect(0, 0, width, height);
 
-    const range = maxVal - minVal || 1;
+    const rawRange = maxVal - minVal;
+    const range = isFinite(rawRange) && rawRange > 0 ? rawRange : 1;
 
     for (let yi = 0; yi < rows; yi++) {
       for (let xi = 0; xi < cols; xi++) {
@@ -151,7 +152,8 @@ export function Heatmap({ results }: HeatmapProps) {
     ctx.textBaseline = 'top';
     for (let xi = 0; xi < cols; xi++) {
       const x = MARGIN_LEFT + xi * cellW + cellW / 2;
-      const label = xVals[xi].toFixed(xVals[xi] % 1 === 0 ? 0 : 1);
+      const xv = xVals[xi];
+      const label = xv != null ? Number(xv).toFixed(xv % 1 === 0 ? 0 : 1) : '-';
       ctx.fillText(label, x, MARGIN_TOP + rows * cellH + 4);
     }
 
@@ -160,7 +162,8 @@ export function Heatmap({ results }: HeatmapProps) {
     ctx.textBaseline = 'middle';
     for (let yi = 0; yi < rows; yi++) {
       const y = MARGIN_TOP + (rows - 1 - yi) * cellH + cellH / 2;
-      const label = yVals[yi].toFixed(yVals[yi] % 1 === 0 ? 0 : 1);
+      const yv = yVals[yi];
+      const label = yv != null ? Number(yv).toFixed(yv % 1 === 0 ? 0 : 1) : '-';
       ctx.fillText(label, MARGIN_LEFT - 6, y);
     }
 
@@ -216,7 +219,7 @@ export function Heatmap({ results }: HeatmapProps) {
         tooltip.innerHTML = `
           <div class="font-semibold">${metricLabel}: ${val !== null ? (typeof val === 'number' ? val.toFixed(2) : val) : 'N/A'}</div>
           <div class="text-[10px] opacity-80 mt-0.5">${paramsStr}</div>
-          <div class="text-[10px] opacity-60 mt-0.5">Return: ${entry.return_percent.toFixed(1)}% | DD: ${entry.max_drawdown.toFixed(1)}% | Sharpe: ${entry.sharpe_ratio.toFixed(2)}</div>
+          <div class="text-[10px] opacity-60 mt-0.5">Return: ${(entry.return_percent ?? 0).toFixed(1)}% | DD: ${(entry.max_drawdown ?? 0).toFixed(1)}% | Sharpe: ${(entry.sharpe_ratio ?? 0).toFixed(2)}</div>
         `;
       } else {
         tooltip.innerHTML = '<div class="opacity-60">No data</div>';

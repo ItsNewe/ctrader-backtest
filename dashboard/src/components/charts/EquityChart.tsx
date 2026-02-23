@@ -90,7 +90,7 @@ export const EquityChart = memo(function EquityChart({
 
     const data: { time: Time; value: number }[] = [];
 
-    if (timestamps.length === equityCurve.length) {
+    if (timestamps && timestamps.length === equityCurve.length) {
       for (let i = 0; i < equityCurve.length; i++) {
         try {
           data.push({

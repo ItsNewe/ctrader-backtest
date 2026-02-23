@@ -24,8 +24,14 @@ interface BacktestMetrics {
   stop_out_occurred: boolean;
 }
 
+/** Safe number helper: returns 0 for null/undefined/NaN */
+const n = (v: unknown): number => {
+  const num = Number(v);
+  return isNaN(num) ? 0 : num;
+};
+
 export function ResultsSummary({ metrics }: { metrics: BacktestMetrics }) {
-  const isProfit = metrics.total_pnl >= 0;
+  const isProfit = n(metrics.total_pnl) >= 0;
 
   return (
     <div className="space-y-3">
@@ -33,40 +39,40 @@ export function ResultsSummary({ metrics }: { metrics: BacktestMetrics }) {
       <div className="grid grid-cols-6 gap-2">
         <MetricCard
           label="Final Balance"
-          value={`$${metrics.final_balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={`$${n(metrics.final_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           color={isProfit ? 'var(--color-success)' : 'var(--color-danger)'}
           icon={DollarSign}
         />
         <MetricCard
           label="Return"
-          value={`${metrics.return_percent >= 0 ? '+' : ''}${metrics.return_percent.toFixed(1)}%`}
-          subtitle={`${metrics.return_percent >= 0 ? '+' : ''}$${metrics.total_pnl.toFixed(2)}`}
+          value={`${n(metrics.return_percent) >= 0 ? '+' : ''}${n(metrics.return_percent).toFixed(1)}%`}
+          subtitle={`${n(metrics.return_percent) >= 0 ? '+' : ''}$${n(metrics.total_pnl).toFixed(2)}`}
           color={isProfit ? 'var(--color-success)' : 'var(--color-danger)'}
           icon={isProfit ? TrendingUp : TrendingDown}
         />
         <MetricCard
           label="Win Rate"
-          value={`${metrics.win_rate.toFixed(1)}%`}
-          subtitle={`${metrics.winning_trades}W / ${metrics.losing_trades}L`}
-          color={metrics.win_rate >= 50 ? 'var(--color-success)' : 'var(--color-warning)'}
+          value={`${n(metrics.win_rate).toFixed(1)}%`}
+          subtitle={`${n(metrics.winning_trades)}W / ${n(metrics.losing_trades)}L`}
+          color={n(metrics.win_rate) >= 50 ? 'var(--color-success)' : 'var(--color-warning)'}
           icon={BarChart3}
         />
         <MetricCard
           label="Max Drawdown"
-          value={`${metrics.max_drawdown_pct.toFixed(1)}%`}
-          color={metrics.max_drawdown_pct < 30 ? 'var(--color-success)' : metrics.max_drawdown_pct < 60 ? 'var(--color-warning)' : 'var(--color-danger)'}
+          value={`${n(metrics.max_drawdown_pct).toFixed(1)}%`}
+          color={n(metrics.max_drawdown_pct) < 30 ? 'var(--color-success)' : n(metrics.max_drawdown_pct) < 60 ? 'var(--color-warning)' : 'var(--color-danger)'}
           icon={Shield}
         />
         <MetricCard
           label="Sharpe"
-          value={metrics.sharpe_ratio.toFixed(2)}
-          color={metrics.sharpe_ratio > 1 ? 'var(--color-success)' : 'var(--color-text-secondary)'}
+          value={n(metrics.sharpe_ratio).toFixed(2)}
+          color={n(metrics.sharpe_ratio) > 1 ? 'var(--color-success)' : 'var(--color-text-secondary)'}
           icon={Activity}
         />
         <MetricCard
           label="Profit Factor"
-          value={metrics.profit_factor.toFixed(2)}
-          color={metrics.profit_factor > 1 ? 'var(--color-success)' : 'var(--color-danger)'}
+          value={n(metrics.profit_factor).toFixed(2)}
+          color={n(metrics.profit_factor) > 1 ? 'var(--color-success)' : 'var(--color-danger)'}
           icon={TrendingUp}
         />
       </div>
@@ -74,16 +80,16 @@ export function ResultsSummary({ metrics }: { metrics: BacktestMetrics }) {
       {/* Secondary metrics */}
       <div className="bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border)] p-3">
         <div className="grid grid-cols-4 gap-x-6 gap-y-2 text-xs">
-          <StatRow label="Total Trades" value={metrics.total_trades.toLocaleString()} />
-          <StatRow label="Avg Win" value={`$${metrics.average_win.toFixed(2)}`} color="var(--color-success)" />
-          <StatRow label="Avg Loss" value={`$${metrics.average_loss.toFixed(2)}`} color="var(--color-danger)" />
-          <StatRow label="Sortino" value={metrics.sortino_ratio.toFixed(2)} />
-          <StatRow label="Recovery Factor" value={metrics.recovery_factor.toFixed(2)} />
-          <StatRow label="Largest Win" value={`$${metrics.largest_win.toFixed(2)}`} color="var(--color-success)" />
-          <StatRow label="Largest Loss" value={`$${metrics.largest_loss.toFixed(2)}`} color="var(--color-danger)" />
-          <StatRow label="Total Swap" value={`$${metrics.total_swap.toFixed(2)}`} />
-          <StatRow label="Peak Equity" value={`$${metrics.peak_equity.toFixed(2)}`} />
-          <StatRow label="Max Positions" value={String(metrics.max_open_positions)} />
+          <StatRow label="Total Trades" value={n(metrics.total_trades).toLocaleString()} />
+          <StatRow label="Avg Win" value={`$${n(metrics.average_win).toFixed(2)}`} color="var(--color-success)" />
+          <StatRow label="Avg Loss" value={`$${n(metrics.average_loss).toFixed(2)}`} color="var(--color-danger)" />
+          <StatRow label="Sortino" value={n(metrics.sortino_ratio).toFixed(2)} />
+          <StatRow label="Recovery Factor" value={n(metrics.recovery_factor).toFixed(2)} />
+          <StatRow label="Largest Win" value={`$${n(metrics.largest_win).toFixed(2)}`} color="var(--color-success)" />
+          <StatRow label="Largest Loss" value={`$${n(metrics.largest_loss).toFixed(2)}`} color="var(--color-danger)" />
+          <StatRow label="Total Swap" value={`$${n(metrics.total_swap).toFixed(2)}`} />
+          <StatRow label="Peak Equity" value={`$${n(metrics.peak_equity).toFixed(2)}`} />
+          <StatRow label="Max Positions" value={String(n(metrics.max_open_positions))} />
           <StatRow
             label="Stop Out"
             value={metrics.stop_out_occurred ? 'YES' : 'No'}

@@ -175,9 +175,9 @@ export function Settings() {
             <StatusRow label="Broker Key" value={brokerKey || ''} mono />
             {accountInfo && (
               <>
-                <StatusRow label="Balance" value={`$${accountInfo.balance.toLocaleString()}`} />
-                <StatusRow label="Equity" value={`$${accountInfo.equity.toLocaleString()}`} />
-                <StatusRow label="Leverage" value={`1:${accountInfo.leverage}`} />
+                <StatusRow label="Balance" value={`$${(accountInfo.balance ?? 0).toLocaleString()}`} />
+                <StatusRow label="Equity" value={`$${(accountInfo.equity ?? 0).toLocaleString()}`} />
+                <StatusRow label="Leverage" value={`1:${accountInfo.leverage ?? 0}`} />
               </>
             )}
           </div>
@@ -250,7 +250,7 @@ export function Settings() {
                 <div>
                   {downloadResult.status === 'success' ? (
                     <>
-                      Downloaded {downloadResult.tick_count?.toLocaleString()} ticks ({downloadResult.file_size_mb} MB)
+                      Downloaded {downloadResult.tick_count?.toLocaleString()} ticks ({downloadResult.file_size_mb ?? 0} MB)
                     </>
                   ) : (
                     downloadResult.message

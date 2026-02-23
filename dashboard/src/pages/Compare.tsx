@@ -392,16 +392,16 @@ interface MetricDef {
 }
 
 const COMPARE_METRICS: MetricDef[] = [
-  { key: 'return_percent', label: 'Return %', format: (v) => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`, higherBetter: true },
-  { key: 'final_balance', label: 'Final Balance', format: (v) => `$${(v as number).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, higherBetter: true },
-  { key: 'sharpe_ratio', label: 'Sharpe Ratio', format: (v) => (v as number).toFixed(2), higherBetter: true },
-  { key: 'sortino_ratio', label: 'Sortino Ratio', format: (v) => (v as number).toFixed(2), higherBetter: true },
-  { key: 'max_drawdown_pct', label: 'Max Drawdown %', format: (v) => `${(v as number).toFixed(1)}%`, higherBetter: false },
-  { key: 'profit_factor', label: 'Profit Factor', format: (v) => (v as number).toFixed(2), higherBetter: true },
-  { key: 'recovery_factor', label: 'Recovery Factor', format: (v) => (v as number).toFixed(2), higherBetter: true },
-  { key: 'win_rate', label: 'Win Rate %', format: (v) => `${(v as number).toFixed(1)}%`, higherBetter: true },
-  { key: 'total_trades', label: 'Total Trades', format: (v) => (v as number).toLocaleString() },
-  { key: 'max_open_positions', label: 'Max Positions', format: (v) => String(v) },
+  { key: 'return_percent', label: 'Return %', format: (v) => `${(Number(v) || 0) >= 0 ? '+' : ''}${(Number(v) || 0).toFixed(1)}%`, higherBetter: true },
+  { key: 'final_balance', label: 'Final Balance', format: (v) => `$${(Number(v) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, higherBetter: true },
+  { key: 'sharpe_ratio', label: 'Sharpe Ratio', format: (v) => (Number(v) || 0).toFixed(2), higherBetter: true },
+  { key: 'sortino_ratio', label: 'Sortino Ratio', format: (v) => (Number(v) || 0).toFixed(2), higherBetter: true },
+  { key: 'max_drawdown_pct', label: 'Max Drawdown %', format: (v) => `${(Number(v) || 0).toFixed(1)}%`, higherBetter: false },
+  { key: 'profit_factor', label: 'Profit Factor', format: (v) => (Number(v) || 0).toFixed(2), higherBetter: true },
+  { key: 'recovery_factor', label: 'Recovery Factor', format: (v) => (Number(v) || 0).toFixed(2), higherBetter: true },
+  { key: 'win_rate', label: 'Win Rate %', format: (v) => `${(Number(v) || 0).toFixed(1)}%`, higherBetter: true },
+  { key: 'total_trades', label: 'Total Trades', format: (v) => (Number(v) || 0).toLocaleString() },
+  { key: 'max_open_positions', label: 'Max Positions', format: (v) => String(v ?? 0) },
   { key: 'stop_out_occurred', label: 'Stop Out', format: (v) => v ? 'YES' : 'No' },
 ];
 
