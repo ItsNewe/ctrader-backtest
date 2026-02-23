@@ -8,6 +8,7 @@ export interface StrategyParameter {
   step?: number;
   options?: string[];
   description: string;
+  advanced?: boolean;
 }
 
 export interface Strategy {

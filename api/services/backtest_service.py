@@ -7,111 +7,53 @@ import asyncio
 import json
 import logging
 import subprocess
-from pathlib import Path
 from typing import Optional
 
-from api.config import get_settings
 from api.models.backtest import BacktestConfig, BacktestResult
-from api.services.strategy_registry import get_strategy
+from api.services.cli_builder import build_backtest_command
+from api.services.tick_file_service import find_tick_file
+from api.services.strategy_registry import validate_strategy_params
 
 logger = logging.getLogger(__name__)
-
-
-def _find_tick_file(symbol: str) -> Optional[str]:
-    """Find tick data file for a symbol."""
-    settings = get_settings()
-    data_dir = settings.data_dir
-
-    # Search patterns
-    suffixes = ["_TICKS_2025.csv", "_TESTER_TICKS.csv", "_TICKS_MT5_EXPORT.csv", "_TICKS.csv",
-                "_TICKS_FULL.csv"]
-    search_dirs = [
-        data_dir / "Grid",
-        data_dir / symbol,
-        data_dir,
-        data_dir / "Broker",
-    ]
-
-    for d in search_dirs:
-        if not d.exists():
-            continue
-        for suffix in suffixes:
-            path = d / f"{symbol}{suffix}"
-            if path.exists():
-                return str(path)
-
-    return None
-
-
-def _build_command(config: BacktestConfig) -> list[str]:
-    """Build the command line for dashboard_cli.exe."""
-    settings = get_settings()
-    exe = str(settings.backtest_exe_path)
-
-    # Resolve strategy CLI name
-    strategy_info = get_strategy(config.strategy)
-    cli_name = strategy_info["cli_name"] if strategy_info else config.strategy
-
-    # Find tick file
-    tick_file = config.tick_file_path
-    if not tick_file:
-        tick_file = _find_tick_file(config.symbol)
-    if not tick_file:
-        raise FileNotFoundError(
-            f"No tick data file found for {config.symbol}. "
-            "Download tick data first via Settings > Data Manager."
-        )
-
-    cmd = [
-        exe,
-        "--strategy", cli_name,
-        "--symbol", config.symbol,
-        "--start", config.start_date,
-        "--end", config.end_date,
-        "--balance", str(config.initial_balance),
-        "--data", tick_file,
-        "--contract-size", str(config.contract_size),
-        "--leverage", str(config.leverage),
-        "--swap-long", str(config.swap_long),
-        "--swap-short", str(config.swap_short),
-        "--pip-size", str(config.pip_size),
-        "--max-equity-samples", "2000",
-        "--max-trades", "10000",
-    ]
-
-    # Strategy-specific params (survive_pct -> --survive, base_spacing -> --spacing, etc.)
-    param_map = {
-        "survive_pct": "survive",
-        "base_spacing": "spacing",
-        "lookback_hours": "lookback",
-        "antifragile_scale": "antifragile",
-        "velocity_threshold": "velocity",
-        "max_spacing_mult": "max-spacing-mult",
-        "tp_mode": "tp-mode",
-        "sizing_mode": "sizing-mode",
-    }
-    for key, value in config.strategy_params.items():
-        cli_key = param_map.get(key, key.replace("_", "-"))
-        # Boolean flags
-        if key == "pct_spacing" and value:
-            cmd.append("--pct-spacing")
-        elif key == "force_min_volume_entry" and value:
-            cmd.append("--force-min-volume")
-        elif key == "enable_velocity_filter" and not value:
-            cmd.append("--no-velocity-filter")
-        elif key not in ("pct_spacing", "force_min_volume_entry", "enable_velocity_filter"):
-            cmd.extend([f"--{cli_key}", str(value)])
-
-    if config.verbose:
-        cmd.append("--verbose")
-
-    return cmd
 
 
 def _run_backtest_sync(config: BacktestConfig) -> BacktestResult:
     """Synchronous backtest execution (runs in thread pool)."""
     try:
-        cmd = _build_command(config)
+        # Validate and fill defaults for strategy parameters
+        try:
+            cleaned_params = validate_strategy_params(config.strategy, config.strategy_params)
+        except ValueError as e:
+            return BacktestResult(status="error", message=str(e))
+
+        # Find tick file
+        tick_file = config.tick_file_path
+        if not tick_file:
+            tick_file = find_tick_file(config.symbol)
+        if not tick_file:
+            return BacktestResult(
+                status="error",
+                message=f"No tick data file found for {config.symbol}. "
+                "Download tick data first via Settings > Data Manager.",
+            )
+
+        # Build CLI command using shared builder
+        cmd = build_backtest_command(
+            strategy_id=config.strategy,
+            symbol=config.symbol,
+            start_date=config.start_date,
+            end_date=config.end_date,
+            initial_balance=config.initial_balance,
+            tick_file=tick_file,
+            contract_size=config.contract_size,
+            leverage=config.leverage,
+            pip_size=config.pip_size,
+            swap_long=config.swap_long,
+            swap_short=config.swap_short,
+            strategy_params=cleaned_params,
+            verbose=config.verbose,
+        )
+
         logger.info(f"Running backtest: {' '.join(cmd)}")
 
         result = subprocess.run(

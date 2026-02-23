@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     debug: bool = True
 
     # Sweep defaults
-    max_sweep_workers: int = 4
+    max_sweep_workers: int = 16
     sweep_timeout_seconds: int = 300
 
     model_config = {

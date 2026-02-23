@@ -1,13 +1,14 @@
 /**
  * Dashboard CLI - Extended backtest CLI for the React dashboard
  *
- * Extends the original backtest_cli with:
- * - CLI flags for all broker settings (contract-size, leverage, swap, pip-size)
- * - Full trade list output in JSON
- * - Max equity samples capping for browser performance
- * - All strategy parameters as CLI flags
+ * Supports two parameter passing modes:
+ *   1. Named flags:  --survive 13.0 --spacing 1.5 (backward compatible)
+ *   2. Generic:      --param survive_pct=13.0 --param base_spacing=1.5
  *
- * Usage: dashboard_cli.exe --symbol XAUUSD --strategy fillup --survive 13.0 --spacing 1.5 ...
+ * Both modes write to the same ParamMap. The --param approach is preferred
+ * by the dashboard API as it requires no per-parameter CLI flag mapping.
+ *
+ * Usage: dashboard_cli.exe --symbol XAUUSD --strategy fillup --param survive_pct=13.0 ...
  *
  * Build via CMake (in validation/CMakeLists.txt) or:
  *   g++ -O3 -mavx2 -mfma -std=c++17 -I ../include validation/dashboard_cli.cpp -o build/validation/dashboard_cli.exe
@@ -29,6 +30,36 @@
 
 using namespace backtest;
 namespace fs = std::filesystem;
+
+// ──────────────────── ParamMap Type & Helpers ────────────────────
+
+using ParamMap = std::map<std::string, std::string>;
+
+double get_double(const ParamMap& p, const std::string& key, double def) {
+    auto it = p.find(key);
+    if (it == p.end()) return def;
+    try { return std::stod(it->second); }
+    catch (...) { return def; }
+}
+
+int get_int(const ParamMap& p, const std::string& key, int def) {
+    auto it = p.find(key);
+    if (it == p.end()) return def;
+    try { return std::stoi(it->second); }
+    catch (...) { return def; }
+}
+
+std::string get_string(const ParamMap& p, const std::string& key, const std::string& def) {
+    auto it = p.find(key);
+    return (it != p.end()) ? it->second : def;
+}
+
+bool get_bool(const ParamMap& p, const std::string& key, bool def) {
+    auto it = p.find(key);
+    if (it == p.end()) return def;
+    const auto& v = it->second;
+    return (v == "true" || v == "1" || v == "yes" || v == "True");
+}
 
 // ──────────────────── Environment & File Discovery ────────────────────
 
@@ -104,7 +135,7 @@ public:
     void key(const std::string& k) {
         comma();
         ss << "\"" << k << "\":";
-        first = true; // next value doesn't need comma
+        first = true;
     }
 
     void value_str(const std::string& v) { ss << "\"" << v << "\""; first = false; }
@@ -136,26 +167,13 @@ struct Config {
     double swap_long = -999.0;    // sentinel for "not set"
     double swap_short = -999.0;
 
-    // FillUp parameters
-    double survive_pct = 13.0;
-    double base_spacing = 1.5;
-    std::string mode = "ADAPTIVE_SPACING";
-    double lookback_hours = 4.0;
-    double antifragile_scale = 0.1;
-    double velocity_threshold = 30.0;
-    double max_spacing_mult = 30.0;
-    bool pct_spacing = false;
-    bool force_min_volume_entry = false;
-
-    // CombinedJu parameters
-    std::string tp_mode = "LINEAR";
-    std::string sizing_mode = "UNIFORM";
-    bool enable_velocity_filter = true;
-
     // Output control
     int max_equity_samples = 2000;
     bool include_trades = true;
     int max_trades = 10000;
+
+    // Generic strategy parameters (populated by --param key=value and legacy flags)
+    ParamMap params;
 
     void apply_symbol_defaults() {
         if (symbol == "XAGUSD") {
@@ -185,26 +203,28 @@ void print_usage() {
     std::cerr << "  --start DATE            Start date YYYY.MM.DD (default: 2024.12.31)\n";
     std::cerr << "  --end DATE              End date YYYY.MM.DD (default: 2025.01.31)\n";
     std::cerr << "  --balance AMOUNT        Initial balance (default: 10000)\n\n";
-    std::cerr << "Broker Settings (override symbol defaults):\n";
+    std::cerr << "Broker Settings:\n";
     std::cerr << "  --contract-size VALUE   Contract size (XAUUSD=100, XAGUSD=5000)\n";
     std::cerr << "  --leverage VALUE        Account leverage (default: 500)\n";
     std::cerr << "  --pip-size VALUE        Pip size (XAUUSD=0.01, XAGUSD=0.001)\n";
     std::cerr << "  --swap-long VALUE       Swap for long positions\n";
     std::cerr << "  --swap-short VALUE      Swap for short positions\n\n";
-    std::cerr << "FillUp Parameters:\n";
-    std::cerr << "  --survive PCT           Survive percentage (default: 13.0)\n";
-    std::cerr << "  --spacing AMOUNT        Base spacing (default: 1.5)\n";
-    std::cerr << "  --mode MODE             BASELINE|ADAPTIVE_SPACING|ANTIFRAGILE|VELOCITY_FILTER|ALL_COMBINED\n";
-    std::cerr << "  --lookback HOURS        Volatility lookback (default: 4.0)\n";
-    std::cerr << "  --antifragile SCALE     Antifragile scale (default: 0.1)\n";
-    std::cerr << "  --velocity THRESHOLD    Velocity threshold $/hr (default: 30.0)\n";
-    std::cerr << "  --max-spacing-mult N    Max spacing multiplier (default: 30.0)\n";
-    std::cerr << "  --pct-spacing           Use percentage-based spacing\n";
-    std::cerr << "  --force-min-volume      Force min volume entry\n\n";
-    std::cerr << "CombinedJu Parameters:\n";
-    std::cerr << "  --tp-mode MODE          FIXED|SQRT|LINEAR (default: LINEAR)\n";
-    std::cerr << "  --sizing-mode MODE      UNIFORM|LINEAR_SIZING|THRESHOLD_SIZING (default: UNIFORM)\n";
-    std::cerr << "  --no-velocity-filter    Disable velocity filter\n\n";
+    std::cerr << "Strategy Parameters (generic):\n";
+    std::cerr << "  --param key=value       Set strategy parameter (repeatable)\n\n";
+    std::cerr << "Legacy FillUp Flags (backward compatible, same as --param):\n";
+    std::cerr << "  --survive PCT           = --param survive_pct=PCT\n";
+    std::cerr << "  --spacing AMOUNT        = --param base_spacing=AMOUNT\n";
+    std::cerr << "  --mode MODE             = --param mode=MODE\n";
+    std::cerr << "  --lookback HOURS        = --param lookback_hours=HOURS\n";
+    std::cerr << "  --antifragile SCALE     = --param antifragile_scale=SCALE\n";
+    std::cerr << "  --velocity THRESHOLD    = --param velocity_threshold=THRESHOLD\n";
+    std::cerr << "  --max-spacing-mult N    = --param max_spacing_mult=N\n";
+    std::cerr << "  --pct-spacing           = --param pct_spacing=true\n";
+    std::cerr << "  --force-min-volume      = --param force_min_volume_entry=true\n\n";
+    std::cerr << "Legacy CombinedJu Flags:\n";
+    std::cerr << "  --tp-mode MODE          = --param tp_mode=MODE\n";
+    std::cerr << "  --sizing-mode MODE      = --param sizing_mode=MODE\n";
+    std::cerr << "  --no-velocity-filter    = --param enable_velocity_filter=false\n\n";
     std::cerr << "Output Control:\n";
     std::cerr << "  --max-equity-samples N  Cap equity curve points (default: 2000)\n";
     std::cerr << "  --max-trades N          Max trades in output (default: 10000)\n";
@@ -238,21 +258,28 @@ Config parse_args(int argc, char* argv[]) {
         else if (arg == "--swap-long" && i + 1 < argc) cfg.swap_long = std::stod(argv[++i]);
         else if (arg == "--swap-short" && i + 1 < argc) cfg.swap_short = std::stod(argv[++i]);
 
-        // FillUp parameters
-        else if (arg == "--survive" && i + 1 < argc) cfg.survive_pct = std::stod(argv[++i]);
-        else if (arg == "--spacing" && i + 1 < argc) cfg.base_spacing = std::stod(argv[++i]);
-        else if (arg == "--mode" && i + 1 < argc) cfg.mode = argv[++i];
-        else if (arg == "--lookback" && i + 1 < argc) cfg.lookback_hours = std::stod(argv[++i]);
-        else if (arg == "--antifragile" && i + 1 < argc) cfg.antifragile_scale = std::stod(argv[++i]);
-        else if (arg == "--velocity" && i + 1 < argc) cfg.velocity_threshold = std::stod(argv[++i]);
-        else if (arg == "--max-spacing-mult" && i + 1 < argc) cfg.max_spacing_mult = std::stod(argv[++i]);
-        else if (arg == "--pct-spacing") cfg.pct_spacing = true;
-        else if (arg == "--force-min-volume") cfg.force_min_volume_entry = true;
+        // Generic --param key=value (preferred by dashboard API)
+        else if (arg == "--param" && i + 1 < argc) {
+            std::string kv = argv[++i];
+            auto eq = kv.find('=');
+            if (eq != std::string::npos) {
+                cfg.params[kv.substr(0, eq)] = kv.substr(eq + 1);
+            }
+        }
 
-        // CombinedJu parameters
-        else if (arg == "--tp-mode" && i + 1 < argc) cfg.tp_mode = argv[++i];
-        else if (arg == "--sizing-mode" && i + 1 < argc) cfg.sizing_mode = argv[++i];
-        else if (arg == "--no-velocity-filter") cfg.enable_velocity_filter = false;
+        // Legacy named flags → write into params map for backward compatibility
+        else if (arg == "--survive" && i + 1 < argc) cfg.params["survive_pct"] = argv[++i];
+        else if (arg == "--spacing" && i + 1 < argc) cfg.params["base_spacing"] = argv[++i];
+        else if (arg == "--mode" && i + 1 < argc) cfg.params["mode"] = argv[++i];
+        else if (arg == "--lookback" && i + 1 < argc) cfg.params["lookback_hours"] = argv[++i];
+        else if (arg == "--antifragile" && i + 1 < argc) cfg.params["antifragile_scale"] = argv[++i];
+        else if (arg == "--velocity" && i + 1 < argc) cfg.params["velocity_threshold"] = argv[++i];
+        else if (arg == "--max-spacing-mult" && i + 1 < argc) cfg.params["max_spacing_mult"] = argv[++i];
+        else if (arg == "--pct-spacing") cfg.params["pct_spacing"] = "true";
+        else if (arg == "--force-min-volume") cfg.params["force_min_volume_entry"] = "true";
+        else if (arg == "--tp-mode" && i + 1 < argc) cfg.params["tp_mode"] = argv[++i];
+        else if (arg == "--sizing-mode" && i + 1 < argc) cfg.params["sizing_mode"] = argv[++i];
+        else if (arg == "--no-velocity-filter") cfg.params["enable_velocity_filter"] = "false";
 
         // Output control
         else if (arg == "--max-equity-samples" && i + 1 < argc) cfg.max_equity_samples = std::stoi(argv[++i]);
@@ -271,7 +298,7 @@ Config parse_args(int argc, char* argv[]) {
     return cfg;
 }
 
-// ──────────────────── FillUp Mode Parsing ────────────────────
+// ──────────────────── Enum Parsers ────────────────────
 
 FillUpOscillation::Mode parse_fillup_mode(const std::string& mode) {
     if (mode == "BASELINE") return FillUpOscillation::BASELINE;
@@ -279,7 +306,24 @@ FillUpOscillation::Mode parse_fillup_mode(const std::string& mode) {
     if (mode == "ANTIFRAGILE") return FillUpOscillation::ANTIFRAGILE;
     if (mode == "VELOCITY_FILTER") return FillUpOscillation::VELOCITY_FILTER;
     if (mode == "ALL_COMBINED") return FillUpOscillation::ALL_COMBINED;
+    if (mode == "ADAPTIVE_LOOKBACK") return FillUpOscillation::ADAPTIVE_LOOKBACK;
+    if (mode == "DOUBLE_ADAPTIVE") return FillUpOscillation::DOUBLE_ADAPTIVE;
+    if (mode == "TREND_ADAPTIVE") return FillUpOscillation::TREND_ADAPTIVE;
     return FillUpOscillation::ADAPTIVE_SPACING; // default
+}
+
+StrategyCombinedJu::TPMode parse_tp_mode(const std::string& mode) {
+    if (mode == "FIXED") return StrategyCombinedJu::TPMode::FIXED;
+    if (mode == "SQRT") return StrategyCombinedJu::TPMode::SQRT;
+    if (mode == "LINEAR") return StrategyCombinedJu::TPMode::LINEAR;
+    return StrategyCombinedJu::TPMode::LINEAR; // default
+}
+
+StrategyCombinedJu::SizingMode parse_sizing_mode(const std::string& mode) {
+    if (mode == "UNIFORM") return StrategyCombinedJu::SizingMode::UNIFORM;
+    if (mode == "LINEAR_SIZING") return StrategyCombinedJu::SizingMode::LINEAR_SIZING;
+    if (mode == "THRESHOLD_SIZING") return StrategyCombinedJu::SizingMode::THRESHOLD_SIZING;
+    return StrategyCombinedJu::SizingMode::UNIFORM; // default
 }
 
 // ──────────────────── Downsample Equity Curve ────────────────────
@@ -298,6 +342,15 @@ std::vector<T> downsample(const std::vector<T>& data, size_t max_samples) {
     result.push_back(data.back()); // always include last point
 
     return result;
+}
+
+// ──────────────────── Strategy Runner ────────────────────
+
+template<typename Strategy>
+void run_strategy(TickBasedEngine& engine, Strategy& strategy) {
+    engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
+        strategy.OnTick(tick, eng);
+    });
 }
 
 // ──────────────────── Main ────────────────────
@@ -336,6 +389,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Broker: contract_size=" << cfg.contract_size
                   << " leverage=" << cfg.leverage
                   << " pip_size=" << cfg.pip_size << std::endl;
+        std::cerr << "Strategy params (" << cfg.params.size() << "):";
+        for (const auto& [k, v] : cfg.params) std::cerr << " " << k << "=" << v;
+        std::cerr << std::endl;
     }
 
     // Configure tick data
@@ -363,55 +419,56 @@ int main(int argc, char* argv[]) {
 
     try {
         TickBasedEngine engine(bt_config);
+        const auto& p = cfg.params;  // shorthand
 
         // ── Run Strategy ──
         if (cfg.strategy == "fillup" || cfg.strategy == "FillUpOscillation") {
             FillUpOscillation::Config fc;
-            fc.survive_pct = cfg.survive_pct;
-            fc.base_spacing = cfg.base_spacing;
-            fc.min_volume = 0.01;
-            fc.max_volume = 10.0;
-            fc.contract_size = cfg.contract_size;
-            fc.leverage = cfg.leverage;
-            fc.mode = parse_fillup_mode(cfg.mode);
-            fc.antifragile_scale = cfg.antifragile_scale;
-            fc.adaptive.max_spacing_mult = cfg.max_spacing_mult;
-            fc.volatility_lookback_hours = cfg.lookback_hours;
-            fc.adaptive.pct_spacing = cfg.pct_spacing;
-            fc.safety.force_min_volume_entry = cfg.force_min_volume_entry;
-            fc.velocity_threshold = cfg.velocity_threshold;
+            fc.survive_pct                  = get_double(p, "survive_pct", 13.0);
+            fc.base_spacing                 = get_double(p, "base_spacing", 1.5);
+            fc.min_volume                   = get_double(p, "min_volume", 0.01);
+            fc.max_volume                   = get_double(p, "max_volume", 10.0);
+            fc.contract_size                = cfg.contract_size;
+            fc.leverage                     = cfg.leverage;
+            fc.mode                         = parse_fillup_mode(get_string(p, "mode", "ADAPTIVE_SPACING"));
+            fc.antifragile_scale            = get_double(p, "antifragile_scale", 0.1);
+            fc.velocity_threshold           = get_double(p, "velocity_threshold", 30.0);
+            fc.volatility_lookback_hours    = get_double(p, "lookback_hours", 4.0);
+            fc.adaptive.typical_vol_pct     = get_double(p, "typical_vol_pct", 0.55);
+            fc.adaptive.min_spacing_mult    = get_double(p, "min_spacing_mult", 0.5);
+            fc.adaptive.max_spacing_mult    = get_double(p, "max_spacing_mult", 30.0);
+            fc.adaptive.pct_spacing         = get_bool(p, "pct_spacing", false);
+            fc.safety.force_min_volume_entry = get_bool(p, "force_min_volume_entry", false);
 
             FillUpOscillation strategy(fc);
-            engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
-                strategy.OnTick(tick, eng);
-            });
+            run_strategy(engine, strategy);
 
         } else if (cfg.strategy == "combined" || cfg.strategy == "CombinedJu") {
             StrategyCombinedJu::Config jc;
-            jc.survive_pct = cfg.survive_pct;
-            jc.base_spacing = cfg.base_spacing;
-            jc.min_volume = 0.01;
-            jc.max_volume = 10.0;
-            jc.contract_size = cfg.contract_size;
-            jc.leverage = cfg.leverage;
-            jc.force_min_volume_entry = cfg.force_min_volume_entry;
-
-            // TP mode
-            if (cfg.tp_mode == "FIXED") jc.tp_mode = StrategyCombinedJu::TPMode::FIXED;
-            else if (cfg.tp_mode == "SQRT") jc.tp_mode = StrategyCombinedJu::TPMode::SQRT;
-            else jc.tp_mode = StrategyCombinedJu::TPMode::LINEAR;
-
-            // Sizing mode
-            if (cfg.sizing_mode == "LINEAR_SIZING") jc.sizing_mode = StrategyCombinedJu::SizingMode::LINEAR_SIZING;
-            else if (cfg.sizing_mode == "THRESHOLD_SIZING") jc.sizing_mode = StrategyCombinedJu::SizingMode::THRESHOLD_SIZING;
-            else jc.sizing_mode = StrategyCombinedJu::SizingMode::UNIFORM;
-
-            jc.enable_velocity_filter = cfg.enable_velocity_filter;
+            jc.survive_pct                  = get_double(p, "survive_pct", 12.0);
+            jc.base_spacing                 = get_double(p, "base_spacing", 1.0);
+            jc.min_volume                   = get_double(p, "min_volume", 0.01);
+            jc.max_volume                   = get_double(p, "max_volume", 10.0);
+            jc.contract_size                = cfg.contract_size;
+            jc.leverage                     = cfg.leverage;
+            jc.volatility_lookback_hours    = get_double(p, "lookback_hours", 4.0);
+            jc.typical_vol_pct              = get_double(p, "typical_vol_pct", 0.55);
+            jc.tp_mode                      = parse_tp_mode(get_string(p, "tp_mode", "LINEAR"));
+            jc.tp_sqrt_scale                = get_double(p, "tp_sqrt_scale", 0.5);
+            jc.tp_linear_scale              = get_double(p, "tp_linear_scale", 0.3);
+            jc.tp_min                       = get_double(p, "tp_min", 1.50);
+            jc.enable_velocity_filter       = get_bool(p, "enable_velocity_filter", true);
+            jc.velocity_window              = get_int(p, "velocity_window", 10);
+            jc.velocity_threshold_pct       = get_double(p, "velocity_threshold_pct", 0.01);
+            jc.sizing_mode                  = parse_sizing_mode(get_string(p, "sizing_mode", "UNIFORM"));
+            jc.sizing_linear_scale          = get_double(p, "sizing_linear_scale", 0.5);
+            jc.sizing_threshold_pos         = get_int(p, "sizing_threshold_pos", 5);
+            jc.sizing_threshold_mult        = get_double(p, "sizing_threshold_mult", 2.0);
+            jc.force_min_volume_entry       = get_bool(p, "force_min_volume_entry", false);
+            jc.pct_spacing                  = get_bool(p, "pct_spacing", false);
 
             StrategyCombinedJu strategy(jc);
-            engine.Run([&strategy](const Tick& tick, TickBasedEngine& eng) {
-                strategy.OnTick(tick, eng);
-            });
+            run_strategy(engine, strategy);
 
         } else {
             JsonOutput json;

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Play, X, Grid3x3, Shuffle, ArrowUpDown, Trophy, AlertTriangle } from 'lucide-react';
+import { Play, X, Grid3x3, Shuffle, ArrowUpDown, Trophy, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { useBacktest } from '../hooks/useBacktest';
 import { useBroker } from '../hooks/useBroker';
 import { useSweep } from '../hooks/useSweep';
@@ -24,6 +24,7 @@ export function Sweep() {
   const [endDate, setEndDate] = useState('2025.12.30');
   const [balance, setBalance] = useState(10000);
   const [paramRanges, setParamRanges] = useState<ParameterRange[]>([]);
+  const [showAdvancedRanges, setShowAdvancedRanges] = useState(false);
   const [sortBy, setSortBy] = useState('return_percent');
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -50,6 +51,7 @@ export function Sweep() {
           min: p.min ?? (p.default as number) * 0.5,
           max: p.max ?? (p.default as number) * 2,
           step: p.step ?? 1,
+          advanced: p.advanced,
         });
       }
     }
@@ -224,42 +226,37 @@ export function Sweep() {
             <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
               Parameter Ranges
             </div>
-            {paramRanges.map((r, idx) => (
-              <div key={r.name} className="space-y-1">
-                <label className="block text-[10px] text-[var(--color-text-muted)]" title={r.name}>
-                  {r.label}
-                </label>
-                <div className="grid grid-cols-3 gap-1">
-                  <input
-                    type="number"
-                    value={r.min}
-                    onChange={(e) => updateRange(idx, 'min', parseFloat(e.target.value) || 0)}
-                    disabled={running}
-                    className="w-full px-2 py-1 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
-                    placeholder="Min"
-                    title="Min"
-                  />
-                  <input
-                    type="number"
-                    value={r.max}
-                    onChange={(e) => updateRange(idx, 'max', parseFloat(e.target.value) || 0)}
-                    disabled={running}
-                    className="w-full px-2 py-1 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
-                    placeholder="Max"
-                    title="Max"
-                  />
-                  <input
-                    type="number"
-                    value={r.step}
-                    onChange={(e) => updateRange(idx, 'step', parseFloat(e.target.value) || 0.1)}
-                    disabled={running}
-                    className="w-full px-2 py-1 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
-                    placeholder="Step"
-                    title="Step"
-                  />
-                </div>
-              </div>
-            ))}
+            {paramRanges
+              .filter((r) => !r.advanced)
+              .map((r, _) => {
+                const idx = paramRanges.findIndex((pr) => pr.name === r.name);
+                return (
+                  <RangeInput key={r.name} range={r} idx={idx} running={running} updateRange={updateRange} />
+                );
+              })}
+
+            {/* Advanced ranges toggle */}
+            {paramRanges.some((r) => r.advanced) && (
+              <>
+                <button
+                  onClick={() => setShowAdvancedRanges(!showAdvancedRanges)}
+                  className="flex items-center gap-1 w-full pt-1 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+                >
+                  {showAdvancedRanges ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                  Advanced Parameters
+                </button>
+                {showAdvancedRanges &&
+                  paramRanges
+                    .filter((r) => r.advanced)
+                    .map((r) => {
+                      const idx = paramRanges.findIndex((pr) => pr.name === r.name);
+                      return (
+                        <RangeInput key={r.name} range={r} idx={idx} running={running} updateRange={updateRange} />
+                      );
+                    })}
+              </>
+            )}
+
             {paramRanges.length === 0 && (
               <div className="text-xs text-[var(--color-text-muted)] py-4 text-center">
                 Select a strategy with numeric parameters
@@ -504,6 +501,55 @@ function SweepResultsTable({
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function RangeInput({
+  range,
+  idx,
+  running,
+  updateRange,
+}: {
+  range: ParameterRange;
+  idx: number;
+  running: boolean;
+  updateRange: (idx: number, field: 'min' | 'max' | 'step', value: number) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="block text-[10px] text-[var(--color-text-muted)]" title={range.name}>
+        {range.label}
+      </label>
+      <div className="grid grid-cols-3 gap-1">
+        <input
+          type="number"
+          value={range.min}
+          onChange={(e) => updateRange(idx, 'min', parseFloat(e.target.value) || 0)}
+          disabled={running}
+          className="w-full px-2 py-1 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
+          placeholder="Min"
+          title="Min"
+        />
+        <input
+          type="number"
+          value={range.max}
+          onChange={(e) => updateRange(idx, 'max', parseFloat(e.target.value) || 0)}
+          disabled={running}
+          className="w-full px-2 py-1 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
+          placeholder="Max"
+          title="Max"
+        />
+        <input
+          type="number"
+          value={range.step}
+          onChange={(e) => updateRange(idx, 'step', parseFloat(e.target.value) || 0.1)}
+          disabled={running}
+          className="w-full px-2 py-1 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
+          placeholder="Step"
+          title="Step"
+        />
       </div>
     </div>
   );

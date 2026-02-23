@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Play, Loader2, X } from 'lucide-react';
+import { Play, Loader2, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { useBacktest } from '../hooks/useBacktest';
 import { useBroker } from '../hooks/useBroker';
 import { EquityChart } from '../components/charts/EquityChart';
@@ -20,6 +20,7 @@ export function Backtest() {
 
   // Strategy params form state
   const [params, setParams] = useState<Record<string, number | string | boolean>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [startDate, setStartDate] = useState('2025.01.01');
   const [endDate, setEndDate] = useState('2025.12.30');
   const [balance, setBalance] = useState(10000);
@@ -166,18 +167,44 @@ export function Backtest() {
           </div>
 
           {/* Right: Strategy parameters */}
-          <div className="space-y-2 max-h-64 overflow-y-auto">
+          <div className="space-y-2 max-h-72 overflow-y-auto">
             <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
               Strategy Parameters
             </div>
-            {strategy?.parameters.map((p) => (
-              <ParameterInput
-                key={p.name}
-                param={p}
-                value={params[p.name]}
-                onChange={(v) => updateParam(p.name, v)}
-              />
-            ))}
+            {strategy?.parameters
+              .filter((p) => !p.advanced)
+              .map((p) => (
+                <ParameterInput
+                  key={p.name}
+                  param={p}
+                  value={params[p.name]}
+                  onChange={(v) => updateParam(p.name, v)}
+                />
+              ))}
+
+            {/* Advanced parameters toggle */}
+            {strategy?.parameters.some((p) => p.advanced) && (
+              <>
+                <button
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="flex items-center gap-1 w-full pt-1 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+                >
+                  {showAdvanced ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                  Advanced Parameters
+                </button>
+                {showAdvanced &&
+                  strategy.parameters
+                    .filter((p) => p.advanced)
+                    .map((p) => (
+                      <ParameterInput
+                        key={p.name}
+                        param={p}
+                        value={params[p.name]}
+                        onChange={(v) => updateParam(p.name, v)}
+                      />
+                    ))}
+              </>
+            )}
           </div>
 
           {/* Run button */}

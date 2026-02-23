@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Download, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Download, CheckCircle, AlertCircle, Loader2, FolderOpen } from 'lucide-react';
 import { useBroker } from '../hooks/useBroker';
 import { apiGet, apiPost } from '../api/client';
+import { FileBrowser } from '../components/FileBrowser';
 import type { BrokerConnectRequest } from '../types/broker';
 import type { DataFile } from '../types/backtest';
 
@@ -16,6 +17,9 @@ export function Settings() {
     account_currency: 'USD',
     mt5_path: '',
   });
+
+  // File browser state
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
 
   // Data Manager state
   const [dataFiles, setDataFiles] = useState<DataFile[]>([]);
@@ -85,13 +89,26 @@ export function Settings() {
         </h2>
 
         <div className="space-y-3">
-          <FormField
-            label="MT5 Terminal Path"
-            value={form.mt5_path || ''}
-            onChange={(v) => updateField('mt5_path', v)}
-            placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"
-            hint="Leave empty for default installation path"
-          />
+          <div>
+            <label className="block text-xs text-[var(--color-text-secondary)] mb-1">MT5 Terminal Path</label>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={form.mt5_path || ''}
+                onChange={(e) => updateField('mt5_path', e.target.value)}
+                placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"
+                className="flex-1 px-3 py-1.5 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)]"
+              />
+              <button
+                onClick={() => setShowFileBrowser(true)}
+                className="px-2.5 py-1.5 rounded bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] hover:border-[var(--color-accent)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] transition-colors"
+                title="Browse for MT5 terminal"
+              >
+                <FolderOpen size={14} />
+              </button>
+            </div>
+            <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">Leave empty for default installation path</p>
+          </div>
 
           <FormField
             label="Account ID"
@@ -273,6 +290,19 @@ export function Settings() {
           )}
         </div>
       </div>
+
+      {/* File Browser Modal */}
+      {showFileBrowser && (
+        <FileBrowser
+          title="Select MT5 Terminal"
+          filterExt=".exe"
+          onSelect={(path) => {
+            updateField('mt5_path', path);
+            setShowFileBrowser(false);
+          }}
+          onCancel={() => setShowFileBrowser(false)}
+        />
+      )}
     </div>
   );
 }

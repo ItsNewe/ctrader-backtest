@@ -4,6 +4,7 @@ export interface ParameterRange {
   min: number;
   max: number;
   step: number;
+  advanced?: boolean;
 }
 
 export interface SweepConfig {

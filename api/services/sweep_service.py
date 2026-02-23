@@ -13,11 +13,12 @@ import itertools
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Callable
-from pathlib import Path
 
 from api.config import get_settings
 from api.models.sweep import SweepConfig, SweepProgress, SweepResultEntry, ParameterRange
-from api.services.strategy_registry import get_strategy
+from api.services.strategy_registry import get_strategy, validate_strategy_params
+from api.services.tick_file_service import find_tick_file
+from api.services.cli_builder import build_backtest_command
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,6 @@ def generate_random_combinations(ranges: List[ParameterRange], n: int) -> List[D
     for _ in range(n):
         combo = {}
         for r in ranges:
-            # Random value within range, snapped to step
             steps = int(round((r.max - r.min) / r.step))
             step_idx = random.randint(0, steps)
             combo[r.name] = round(r.min + step_idx * r.step, 6)
@@ -56,73 +56,34 @@ def generate_random_combinations(ranges: List[ParameterRange], n: int) -> List[D
     return combos
 
 
-def _find_tick_file(symbol: str) -> Optional[str]:
-    """Find tick data file for a symbol."""
-    settings = get_settings()
-    data_dir = settings.data_dir
-    suffixes = ["_TICKS_2025.csv", "_TESTER_TICKS.csv", "_TICKS_MT5_EXPORT.csv", "_TICKS.csv",
-                "_TICKS_FULL.csv"]
-    search_dirs = [data_dir / "Grid", data_dir / symbol, data_dir, data_dir / "Broker"]
-
-    for d in search_dirs:
-        if not d.exists():
-            continue
-        for suffix in suffixes:
-            path = d / f"{symbol}{suffix}"
-            if path.exists():
-                return str(path)
-    return None
-
-
 def _run_single_backtest(
-    exe: str,
-    cli_name: str,
     config: SweepConfig,
     tick_file: str,
     params: Dict[str, float],
 ) -> Optional[SweepResultEntry]:
     """Run a single backtest with given parameters. Returns result entry or None."""
-    # Map param names to CLI flags
-    param_map = {
-        "survive_pct": "survive",
-        "base_spacing": "spacing",
-        "lookback_hours": "lookback",
-        "antifragile_scale": "antifragile",
-        "velocity_threshold": "velocity",
-        "max_spacing_mult": "max-spacing-mult",
-        "tp_mode": "tp-mode",
-        "sizing_mode": "sizing-mode",
-    }
-
-    cmd = [
-        exe,
-        "--strategy", cli_name,
-        "--symbol", config.symbol,
-        "--start", config.start_date,
-        "--end", config.end_date,
-        "--balance", str(config.initial_balance),
-        "--data", tick_file,
-        "--contract-size", str(config.contract_size),
-        "--leverage", str(config.leverage),
-        "--swap-long", str(config.swap_long),
-        "--swap-short", str(config.swap_short),
-        "--pip-size", str(config.pip_size),
-        "--max-equity-samples", "50",  # Minimal for sweep (saves memory)
-        "--no-trades",  # Don't include trade list in sweep output
-    ]
-
-    for key, value in params.items():
-        cli_key = param_map.get(key, key.replace("_", "-"))
-        if key == "pct_spacing" and value:
-            cmd.append("--pct-spacing")
-        elif key == "force_min_volume_entry" and value:
-            cmd.append("--force-min-volume")
-        elif key == "enable_velocity_filter" and not value:
-            cmd.append("--no-velocity-filter")
-        elif key not in ("pct_spacing", "force_min_volume_entry", "enable_velocity_filter"):
-            cmd.extend([f"--{cli_key}", str(value)])
-
     try:
+        # Merge sweep params with any fixed params from config
+        full_params = dict(params)
+
+        # Build CLI command using shared builder
+        cmd = build_backtest_command(
+            strategy_id=config.strategy,
+            symbol=config.symbol,
+            start_date=config.start_date,
+            end_date=config.end_date,
+            initial_balance=config.initial_balance,
+            tick_file=tick_file,
+            contract_size=config.contract_size,
+            leverage=config.leverage,
+            pip_size=config.pip_size,
+            swap_long=config.swap_long,
+            swap_short=config.swap_short,
+            strategy_params=full_params,
+            max_equity_samples=50,  # Minimal for sweep
+            include_trades=False,   # No trade list in sweep
+        )
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             logger.debug(f"Backtest failed (rc={result.returncode}): {result.stderr[:200]}")
@@ -171,20 +132,14 @@ async def start_sweep(
         )
         return sweep_id
 
-    # Find tick file
-    tick_file = config.tick_file_path or _find_tick_file(config.symbol)
+    # Find tick file using shared service
+    tick_file = config.tick_file_path or find_tick_file(config.symbol)
     if not tick_file:
         _active_sweeps[sweep_id] = SweepProgress(
             sweep_id=sweep_id, status="error",
             message=f"No tick data found for {config.symbol}"
         )
         return sweep_id
-
-    # Resolve CLI
-    settings = get_settings()
-    exe = str(settings.backtest_exe_path)
-    strategy_info = get_strategy(config.strategy)
-    cli_name = strategy_info["cli_name"] if strategy_info else config.strategy
 
     # Initialize progress
     _active_sweeps[sweep_id] = SweepProgress(
@@ -203,6 +158,7 @@ async def start_sweep(
 
         def run_batch():
             nonlocal completed, best_entry
+            settings = get_settings()
             max_workers = min(settings.max_sweep_workers, total)
 
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -211,7 +167,7 @@ async def start_sweep(
                     if _sweep_cancel.get(sweep_id, False):
                         break
                     f = pool.submit(
-                        _run_single_backtest, exe, cli_name, config, tick_file, combo
+                        _run_single_backtest, config, tick_file, combo
                     )
                     futures[f] = combo
 
