@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "test_version_1",
+    "strategy_id": "FillUpOscillation",
+    "params": {
+      "survive_pct": 13.0,
+      "base_spacing": 1.5
+    },
+    "notes": "Dynamic test save",
+    "metrics": {},
+    "created_at": 1771849369.2980537
+  }
+]
