@@ -1,6 +1,80 @@
 # cTrader C++ Backtesting Engine
 
-A high-performance C++ backtesting engine for cTrader with support for multiple testing modes, parallel optimization, and live broker integration.
+A high-performance C++ tick-based backtesting engine with a React dashboard for strategy analysis. Supports parameter sweeps, Monte Carlo simulation, walk-forward analysis, and risk dashboards.
+
+## Quick Start: Dashboard GUI
+
+The dashboard provides a full web UI for running backtests, parameter sweeps, and analysis.
+
+### Prerequisites
+
+- **Python 3.10+** with pip
+- **Node.js 18+** with npm
+- **MinGW** (for C++ compilation on Windows) or GCC on Linux
+- **CMake 3.10+**
+
+### 1. Build the C++ Backtester
+
+```bash
+cd ctrader-backtest
+mkdir -p build && cd build
+cmake .. -G "MinGW Makefiles"   # Windows with MinGW
+# cmake .. -G "Unix Makefiles"  # Linux/macOS
+mingw32-make dashboard_cli      # Windows
+# make dashboard_cli            # Linux/macOS
+cd ..
+```
+
+### 2. Start the API Server
+
+```bash
+cd api
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 3. Start the Dashboard
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** in your browser.
+
+### Tick Data
+
+Place tick data CSV files in `validation/Grid/`. The engine auto-detects files named like `XAUUSD_TICKS_2025.csv`. You can also set the `BACKTEST_DATA_DIR` environment variable.
+
+---
+
+## Available Strategies
+
+| Strategy | CLI Name | Description |
+|----------|----------|-------------|
+| FillUp Oscillation | `fillup` | Adaptive grid trading with volatility-based spacing |
+| Combined Ju | `combined` | Rubber Band TP + Velocity Filter + Barbell Sizing |
+| Combined OU+FU | `oufu` | Three sub-strategies: OU Down grid, OU Up continuous, Fill Up with TP |
+
+All strategies are selectable in the dashboard GUI and configurable via the parameter panel.
+
+### Running from CLI
+
+```bash
+# FillUp Oscillation
+./build/validation/dashboard_cli.exe --strategy fillup --symbol XAUUSD \
+  --start 2025.01.01 --end 2025.06.01 --balance 10000 \
+  --param survive_pct=13.0 --param base_spacing=1.5
+
+# Combined OU+FU
+./build/validation/dashboard_cli.exe --strategy oufu --symbol XAUUSD \
+  --start 2025.01.01 --end 2025.02.01 --balance 10000 \
+  --param base_survive=5.0 --param mult_ou_down=1.0 --param mult_ou_up=2.0 \
+  --param mult_fu=0.5 --param fu_spacing=1.0
+```
+
+---
 
 ## 🎯 MT5-Validated Margin & Swap System
 

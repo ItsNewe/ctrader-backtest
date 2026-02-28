@@ -16,6 +16,7 @@
 
 #include "../include/fill_up_oscillation.h"
 #include "../include/strategy_combined_ju.h"
+#include "../include/strategy_combined_ou_fu.h"
 #include "../include/tick_based_engine.h"
 #include <iostream>
 #include <fstream>
@@ -198,7 +199,7 @@ void print_usage() {
     std::cerr << "Usage: dashboard_cli.exe [options]\n\n";
     std::cerr << "Required:\n";
     std::cerr << "  --symbol SYMBOL         Trading symbol (default: XAUUSD)\n";
-    std::cerr << "  --strategy NAME         fillup | combined (default: fillup)\n\n";
+    std::cerr << "  --strategy NAME         fillup | combined | oufu (default: fillup)\n\n";
     std::cerr << "Date Range:\n";
     std::cerr << "  --start DATE            Start date YYYY.MM.DD (default: 2024.12.31)\n";
     std::cerr << "  --end DATE              End date YYYY.MM.DD (default: 2025.01.31)\n";
@@ -470,12 +471,31 @@ int main(int argc, char* argv[]) {
             StrategyCombinedJu strategy(jc);
             run_strategy(engine, strategy);
 
+        } else if (cfg.strategy == "oufu" || cfg.strategy == "CombinedOUFU") {
+            StrategyCombinedOUFU::Config oc;
+            oc.base_survive                 = get_double(p, "base_survive", 5.0);
+            oc.max_number_of_trades         = get_int(p, "max_number_of_trades", 200);
+            oc.mult_ou_down                 = get_double(p, "mult_ou_down", 1.0);
+            oc.mult_ou_up                   = get_double(p, "mult_ou_up", 2.0);
+            oc.mult_fu                      = get_double(p, "mult_fu", 0.5);
+            oc.ou_sizing                    = get_int(p, "ou_sizing", 0);
+            oc.ou_closing_mode              = get_int(p, "ou_closing_mode", 0);
+            oc.fu_size                      = get_double(p, "fu_size", 1.0);
+            oc.fu_spacing                   = get_double(p, "fu_spacing", 1.0);
+            oc.contract_size                = cfg.contract_size;
+            oc.leverage                     = cfg.leverage;
+            oc.min_volume                   = get_double(p, "min_volume", 0.01);
+            oc.max_volume                   = get_double(p, "max_volume", 10.0);
+
+            StrategyCombinedOUFU strategy(oc);
+            run_strategy(engine, strategy);
+
         } else {
             JsonOutput json;
             json.begin_object();
             json.key("status"); json.value_str("error");
             json.key("message"); json.value_str("Unknown strategy: " + cfg.strategy +
-                ". Available: fillup, combined");
+                ". Available: fillup, combined, oufu");
             json.end_object();
             std::cout << json.str() << std::endl;
             return 1;
