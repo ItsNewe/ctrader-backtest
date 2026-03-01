@@ -478,7 +478,9 @@ void sizing_sell() {
     static long leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     static double initial_margin_rate = 0;     // initial margin rate
     static double maintenance_margin_rate = 0; // maintenance margin rate
+    static double initial_margin = 0;  // SYMBOL_MARGIN_INITIAL override
     SymbolInfoMarginRate(_Symbol, ORDER_TYPE_SELL, initial_margin_rate, maintenance_margin_rate);
+    initial_margin = SymbolInfoDouble(_Symbol, SYMBOL_MARGIN_INITIAL);
     double current_margin_level = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
     double used_margin = AccountInfoDouble(ACCOUNT_MARGIN);
     double margin_stop_out_level = AccountInfoDouble(ACCOUNT_MARGIN_SO_SO);
@@ -512,12 +514,12 @@ void sizing_sell() {
                 break;
             case SYMBOL_CALC_MODE_FOREX:
                 //Margin:  Lots * Contract_Size / Leverage * Margin_Rate
-                local_used_margin += trade_size * contract_size / leverage * initial_margin_rate;
-                local_used_margin += trade_size * contract_size / leverage * initial_margin_rate;
+                local_used_margin += trade_size * (initial_margin > 0 ? initial_margin : contract_size / leverage) * initial_margin_rate;
+                local_used_margin += trade_size * (initial_margin > 0 ? initial_margin : contract_size / leverage) * initial_margin_rate;
                 break;
             case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
-                local_used_margin += trade_size * contract_size * initial_margin_rate;
-                local_used_margin += trade_size * contract_size * initial_margin_rate;
+                local_used_margin += trade_size * (initial_margin > 0 ? initial_margin : contract_size) * initial_margin_rate;
+                local_used_margin += trade_size * (initial_margin > 0 ? initial_margin : contract_size) * initial_margin_rate;
                 break;
             case SYMBOL_CALC_MODE_CFD:
                 //Margin: Lots * ContractSize * MarketPrice * Margin_Rate

@@ -119,6 +119,7 @@ void OnTick() {
     static double contract_size;
     static double initial_margin_rate = 0;     // initial margin rate
     static double maintenance_margin_rate = 0; // maintenance margin rate
+    static double initial_margin = 0;  // SYMBOL_MARGIN_INITIAL override
     static long leverage;
     static int calc_mode;
 
@@ -144,6 +145,7 @@ void OnTick() {
         max_volume_alg = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
         margin_stop_out_level = AccountInfoDouble(ACCOUNT_MARGIN_SO_SO);
         SymbolInfoMarginRate(_Symbol, ORDER_TYPE_SELL, initial_margin_rate, maintenance_margin_rate);
+    initial_margin = SymbolInfoDouble(_Symbol, SYMBOL_MARGIN_INITIAL);
         contract_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
         calc_mode = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_CALC_MODE);
         leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
@@ -196,11 +198,11 @@ void OnTick() {
                 break;
             case SYMBOL_CALC_MODE_FOREX:
                 //Margin:  Lots * Contract_Size / Leverage * Margin_Rate
-                trade_size = NormalizeDouble((100 * leverage * equity - 100 * contract_size * MathAbs(distance) * leverage * volume_of_open_trades - leverage * margin_stop_out_level * used_margin) / ( contract_size * ( 100 * MathAbs(distance) * leverage + 100 * current_spread_and_commission * leverage + initial_margin_rate * margin_stop_out_level)), 2);
+                trade_size = NormalizeDouble((100 * leverage * equity - 100 * contract_size * MathAbs(distance) * leverage * volume_of_open_trades - leverage * margin_stop_out_level * used_margin) / ( contract_size * ( 100 * MathAbs(distance) * leverage + 100 * current_spread_and_commission * leverage + (initial_margin > 0 ? initial_margin * leverage / contract_size : 1.0) * initial_margin_rate * margin_stop_out_level)), 2);
                 break;
             case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
                 // Margin:  Lots * Contract_Size * Margin_Rate
-                trade_size = NormalizeDouble((100 * equity - 100 * contract_size * MathAbs(distance) * volume_of_open_trades - margin_stop_out_level * used_margin) / ( contract_size * ( 100 * MathAbs(distance) + 100 * current_spread_and_commission + initial_margin_rate * margin_stop_out_level)), 2);
+                trade_size = NormalizeDouble((100 * equity - 100 * contract_size * MathAbs(distance) * volume_of_open_trades - margin_stop_out_level * used_margin) / ( contract_size * ( 100 * MathAbs(distance) + 100 * current_spread_and_commission + (initial_margin > 0 ? initial_margin / contract_size : 1.0) * initial_margin_rate * margin_stop_out_level)), 2);
                 break;
             case SYMBOL_CALC_MODE_CFD:
                 //Margin: Lots * ContractSize * MarketPrice * Margin_Rate

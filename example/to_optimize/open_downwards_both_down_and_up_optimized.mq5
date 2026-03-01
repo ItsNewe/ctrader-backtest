@@ -22,6 +22,7 @@ input int closing_mode = 0;
 // Cached constants (set once in OnInit)
 double g_min_volume, g_max_volume, g_point, g_contract_size;
 double g_initial_margin_rate, g_maintenance_margin_rate;
+double g_initial_margin;  // SYMBOL_MARGIN_INITIAL override
 long g_leverage;
 int g_calc_mode, g_volume_digits;
 ENUM_ORDER_TYPE_FILLING g_filling_mode;
@@ -224,7 +225,7 @@ void SizingSell() {
                                      (trade_size * g_contract_size * end_price) / g_leverage * g_initial_margin_rate) / 2;
                 break;
             case SYMBOL_CALC_MODE_FOREX:
-                local_used_margin = (trade_size * g_contract_size / g_leverage * g_initial_margin_rate * 2) / 2;
+                local_used_margin = (trade_size * (g_initial_margin > 0 ? g_initial_margin : g_contract_size / g_leverage) * g_initial_margin_rate * 2) / 2;
                 break;
             case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
                 local_used_margin = (trade_size * g_contract_size * g_initial_margin_rate * 2) / 2;
@@ -368,10 +369,10 @@ void OpenNewDownWDown() {
                 trade_size = NormalizeDouble((100 * equity * g_leverage - 100 * g_contract_size * MathAbs(distance) * g_down_volume_of_open_trades * g_leverage - g_leverage * margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread_and_commission * g_leverage + starting_price * g_initial_margin_rate * margin_stop_out_level)), g_volume_digits);
                 break;
             case SYMBOL_CALC_MODE_FOREX:
-                trade_size = NormalizeDouble((100 * g_leverage * equity - 100 * g_contract_size * MathAbs(distance) * g_leverage * g_down_volume_of_open_trades - g_leverage * margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread_and_commission * g_leverage + g_initial_margin_rate * margin_stop_out_level)), g_volume_digits);
+                trade_size = NormalizeDouble((100 * g_leverage * equity - 100 * g_contract_size * MathAbs(distance) * g_leverage * g_down_volume_of_open_trades - g_leverage * margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread_and_commission * g_leverage + (g_initial_margin > 0 ? g_initial_margin * g_leverage / g_contract_size : 1.0) * g_initial_margin_rate * margin_stop_out_level)), g_volume_digits);
                 break;
             case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
-                trade_size = NormalizeDouble((100 * equity - 100 * g_contract_size * MathAbs(distance) * g_down_volume_of_open_trades - margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) + 100 * current_spread_and_commission + g_initial_margin_rate * margin_stop_out_level)), g_volume_digits);
+                trade_size = NormalizeDouble((100 * equity - 100 * g_contract_size * MathAbs(distance) * g_down_volume_of_open_trades - margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) + 100 * current_spread_and_commission + (g_initial_margin > 0 ? g_initial_margin / g_contract_size : 1.0) * g_initial_margin_rate * margin_stop_out_level)), g_volume_digits);
                 break;
             case SYMBOL_CALC_MODE_CFD:
                 trade_size = NormalizeDouble((100 * equity - 100 * g_contract_size * MathAbs(distance) * g_down_volume_of_open_trades - margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) + 100 * current_spread_and_commission + starting_price * g_initial_margin_rate * margin_stop_out_level)), g_volume_digits);
@@ -462,6 +463,7 @@ int OnInit() {
     g_leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     g_calc_mode = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_CALC_MODE);
     SymbolInfoMarginRate(_Symbol, ORDER_TYPE_SELL, g_initial_margin_rate, g_maintenance_margin_rate);
+    g_initial_margin = SymbolInfoDouble(_Symbol, SYMBOL_MARGIN_INITIAL);
 
     g_volume_digits = (g_min_volume == 0.01) ? 2 : (g_min_volume == 0.1) ? 1 : 0;
 

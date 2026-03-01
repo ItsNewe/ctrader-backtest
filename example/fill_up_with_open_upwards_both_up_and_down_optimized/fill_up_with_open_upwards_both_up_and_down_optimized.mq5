@@ -47,6 +47,7 @@ CTrade m_trade;
 //+------------------------------------------------------------------+
 double g_min_volume, g_max_volume, g_point, g_contract_size;
 double g_initial_margin_rate, g_maintenance_margin_rate;
+double g_initial_margin;  // SYMBOL_MARGIN_INITIAL override
 long   g_leverage;
 int    g_calc_mode, g_volume_digits;
 ENUM_ORDER_TYPE_FILLING g_filling_mode;
@@ -146,6 +147,7 @@ int OnInit() {
     g_leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     g_calc_mode = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_CALC_MODE);
     SymbolInfoMarginRate(_Symbol, ORDER_TYPE_BUY, g_initial_margin_rate, g_maintenance_margin_rate);
+    g_initial_margin = SymbolInfoDouble(_Symbol, SYMBOL_MARGIN_INITIAL);
 
     g_volume_digits = (g_min_volume == 0.01) ? 2 : (g_min_volume == 0.1) ? 1 : 0;
 
@@ -465,7 +467,7 @@ double OU_CalculateMargin(double volume, double start_p, double end_p) {
                (volume * g_contract_size * end_p) / g_leverage * g_initial_margin_rate) / 2;
         break;
     case SYMBOL_CALC_MODE_FOREX:
-        res = (volume * g_contract_size / g_leverage * g_initial_margin_rate * 2) / 2;
+        res = (volume * (g_initial_margin > 0 ? g_initial_margin : g_contract_size / g_leverage) * g_initial_margin_rate * 2) / 2;
         break;
     case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
         res = (volume * g_contract_size * g_initial_margin_rate * 2) / 2;

@@ -40,6 +40,7 @@ struct SymbolData {
     double point;
     double contract_size;
     double initial_margin_rate;
+    double   initial_margin;  // SYMBOL_MARGIN_INITIAL override
     double maintenance_margin_rate;
     double current_commission;
     int    calc_mode;
@@ -103,6 +104,7 @@ bool InitSymbol(SymbolData &data, string symbolName, bool enabled, double surviv
     data.contract_size = SymbolInfoDouble(symbolName, SYMBOL_TRADE_CONTRACT_SIZE);
     data.calc_mode = (int)SymbolInfoInteger(symbolName, SYMBOL_TRADE_CALC_MODE);
     SymbolInfoMarginRate(symbolName, ORDER_TYPE_BUY, data.initial_margin_rate, data.maintenance_margin_rate);
+    data.initial_margin = SymbolInfoDouble(symbolName, SYMBOL_MARGIN_INITIAL);
     
     // Volume digits
     data.volume_digits = (data.min_volume == 0.01) ? 2 : (data.min_volume == 0.1) ? 1 : 0;
@@ -260,10 +262,10 @@ void ProcessSymbol(SymbolData &data) {
                 trade_size = NormalizeDouble((100 * equity * g_leverage - 100 * data.contract_size * MathAbs(distance) * data.volume_of_open_trades * g_leverage - g_leverage * g_margin_stop_out_level * used_margin) / (data.contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread_and_commission * g_leverage + starting_price * data.initial_margin_rate * g_margin_stop_out_level)), data.volume_digits);
                 break;
             case SYMBOL_CALC_MODE_FOREX:
-                trade_size = NormalizeDouble((100 * g_leverage * equity - 100 * data.contract_size * MathAbs(distance) * g_leverage * data.volume_of_open_trades - g_leverage * g_margin_stop_out_level * used_margin) / (data.contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread_and_commission * g_leverage + data.initial_margin_rate * g_margin_stop_out_level)), data.volume_digits);
+                trade_size = NormalizeDouble((100 * g_leverage * equity - 100 * data.contract_size * MathAbs(distance) * g_leverage * data.volume_of_open_trades - g_leverage * g_margin_stop_out_level * used_margin) / (data.contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread_and_commission * g_leverage + (data.initial_margin > 0 ? data.initial_margin * g_leverage / data.contract_size : 1.0) * data.initial_margin_rate * g_margin_stop_out_level)), data.volume_digits);
                 break;
             case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
-                trade_size = NormalizeDouble((100 * equity - 100 * data.contract_size * MathAbs(distance) * data.volume_of_open_trades - g_margin_stop_out_level * used_margin) / (data.contract_size * (100 * MathAbs(distance) + 100 * current_spread_and_commission + data.initial_margin_rate * g_margin_stop_out_level)), data.volume_digits);
+                trade_size = NormalizeDouble((100 * equity - 100 * data.contract_size * MathAbs(distance) * data.volume_of_open_trades - g_margin_stop_out_level * used_margin) / (data.contract_size * (100 * MathAbs(distance) + 100 * current_spread_and_commission + (data.initial_margin > 0 ? data.initial_margin / data.contract_size : 1.0) * data.initial_margin_rate * g_margin_stop_out_level)), data.volume_digits);
                 break;
             case SYMBOL_CALC_MODE_CFD:
                 trade_size = NormalizeDouble((100 * equity - 100 * data.contract_size * MathAbs(distance) * data.volume_of_open_trades - g_margin_stop_out_level * used_margin) / (data.contract_size * (100 * MathAbs(distance) + 100 * current_spread_and_commission + starting_price * data.initial_margin_rate * g_margin_stop_out_level)), data.volume_digits);

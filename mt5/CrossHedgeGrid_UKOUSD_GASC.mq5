@@ -65,6 +65,7 @@ struct SymbolState {
     int      calc_mode;
     int      volume_digits;
     double   initial_margin_rate;
+    double   initial_margin;  // SYMBOL_MARGIN_INITIAL override
     double   maintenance_margin_rate;
     ENUM_ORDER_TYPE_FILLING filling_mode;
 
@@ -121,6 +122,7 @@ bool InitSymbol(SymbolState &s, string sym, int magic, bool enabled,
     s.leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     s.calc_mode = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_CALC_MODE);
     SymbolInfoMarginRate(sym, ORDER_TYPE_BUY, s.initial_margin_rate, s.maintenance_margin_rate);
+    s.initial_margin = SymbolInfoDouble(sym, SYMBOL_MARGIN_INITIAL);
 
     s.volume_digits = (s.min_volume == 0.01) ? 2 : (s.min_volume == 0.1) ? 1 : 0;
 
@@ -438,10 +440,10 @@ double CalcUnitMargin(const SymbolState &s, double start_price, double end_price
                       / s.leverage * s.initial_margin_rate;
         break;
     case SYMBOL_CALC_MODE_FOREX:
-        unit_margin = unit * s.contract_size / s.leverage * s.initial_margin_rate;
+        unit_margin = unit * (s.initial_margin > 0 ? s.initial_margin : s.contract_size / s.leverage) * s.initial_margin_rate;
         break;
     case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
-        unit_margin = unit * s.contract_size * s.initial_margin_rate;
+        unit_margin = unit * (s.initial_margin > 0 ? s.initial_margin : s.contract_size) * s.initial_margin_rate;
         break;
     case SYMBOL_CALC_MODE_CFD:
         unit_margin = (unit * s.contract_size * (start_price + end_price) / 2)

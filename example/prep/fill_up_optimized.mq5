@@ -12,6 +12,7 @@ input double spacing = 1;
 // Cached constants (set once in OnInit)
 double g_min_volume, g_max_volume, g_point, g_contract_size;
 double g_initial_margin_rate, g_maintenance_margin_rate;
+double g_initial_margin;  // SYMBOL_MARGIN_INITIAL override
 long g_leverage;
 int g_calc_mode, g_volume_digits;
 ENUM_ORDER_TYPE_FILLING g_filling_mode;
@@ -40,6 +41,7 @@ int OnInit() {
     g_leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
     g_calc_mode = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_CALC_MODE);
     SymbolInfoMarginRate(_Symbol, ORDER_TYPE_BUY, g_initial_margin_rate, g_maintenance_margin_rate);
+    g_initial_margin = SymbolInfoDouble(_Symbol, SYMBOL_MARGIN_INITIAL);
 
     // Volume digits
     g_volume_digits = (g_min_volume == 0.01) ? 2 : (g_min_volume == 0.1) ? 1 : 0;
@@ -202,7 +204,7 @@ void CalcLotSize(double ask) {
             unit_margin = (unit * g_contract_size * (ask + end_price) / 2) / g_leverage * g_initial_margin_rate;
             break;
         case SYMBOL_CALC_MODE_FOREX:
-            unit_margin = unit * g_contract_size / g_leverage * g_initial_margin_rate;
+            unit_margin = unit * (g_initial_margin > 0 ? g_initial_margin : g_contract_size / g_leverage) * g_initial_margin_rate;
             break;
         case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
             unit_margin = unit * g_contract_size * g_initial_margin_rate;

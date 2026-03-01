@@ -17,6 +17,7 @@ input double survive_down = 4; //survive down %
 // Cached constants (set once in OnInit)
 double g_min_volume, g_max_volume, g_point, g_contract_size;
 double g_initial_margin_rate, g_maintenance_margin_rate;
+double g_initial_margin;  // SYMBOL_MARGIN_INITIAL override
 double g_margin_stop_out_level;
 long g_leverage, g_account_limit_orders;
 int g_calc_mode, g_volume_digits;
@@ -43,6 +44,7 @@ int OnInit() {
     g_margin_stop_out_level = AccountInfoDouble(ACCOUNT_MARGIN_SO_SO);
     g_account_limit_orders = AccountInfoInteger(ACCOUNT_LIMIT_ORDERS);
     SymbolInfoMarginRate(_Symbol, ORDER_TYPE_BUY, g_initial_margin_rate, g_maintenance_margin_rate);
+    g_initial_margin = SymbolInfoDouble(_Symbol, SYMBOL_MARGIN_INITIAL);
 
     // Volume digits
     g_volume_digits = (g_min_volume == 0.01) ? 2 : (g_min_volume == 0.1) ? 1 : 0;
@@ -151,10 +153,10 @@ void OnTick() {
                 trade_size = (100 * equity * g_leverage - 100 * g_contract_size * MathAbs(distance) * g_volume_of_open_trades * g_leverage - g_leverage * g_margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread * g_leverage + starting_price * g_initial_margin_rate * g_margin_stop_out_level));
                 break;
             case SYMBOL_CALC_MODE_FOREX:
-                trade_size = (100 * g_leverage * equity - 100 * g_contract_size * MathAbs(distance) * g_leverage * g_volume_of_open_trades - g_leverage * g_margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread * g_leverage + g_initial_margin_rate * g_margin_stop_out_level));
+                trade_size = (100 * g_leverage * equity - 100 * g_contract_size * MathAbs(distance) * g_leverage * g_volume_of_open_trades - g_leverage * g_margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) * g_leverage + 100 * current_spread * g_leverage + (g_initial_margin > 0 ? g_initial_margin * g_leverage / g_contract_size : 1.0) * g_initial_margin_rate * g_margin_stop_out_level));
                 break;
             case SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
-                trade_size = (100 * equity - 100 * g_contract_size * MathAbs(distance) * g_volume_of_open_trades - g_margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) + 100 * current_spread + g_initial_margin_rate * g_margin_stop_out_level));
+                trade_size = (100 * equity - 100 * g_contract_size * MathAbs(distance) * g_volume_of_open_trades - g_margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) + 100 * current_spread + (g_initial_margin > 0 ? g_initial_margin / g_contract_size : 1.0) * g_initial_margin_rate * g_margin_stop_out_level));
                 break;
             case SYMBOL_CALC_MODE_CFD:
                 trade_size = (100 * equity - 100 * g_contract_size * MathAbs(distance) * g_volume_of_open_trades - g_margin_stop_out_level * used_margin) / (g_contract_size * (100 * MathAbs(distance) + 100 * current_spread + starting_price * g_initial_margin_rate * g_margin_stop_out_level));
