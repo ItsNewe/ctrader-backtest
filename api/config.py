@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     mt5_password: str = ""
     mt5_server: str = ""
 
+    # cTrader Open API settings
+    ctrader_client_id: str = ""
+    ctrader_client_secret: str = ""
+    ctrader_access_token: str = ""
+    ctrader_account_id: str = ""
+    ctrader_host_type: str = "demo"  # "demo" or "live"
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000

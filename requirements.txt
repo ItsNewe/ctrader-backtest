@@ -13,4 +13,5 @@ pandas>=2.0.0
 
 # Optional broker integrations
 # MetaTrader5==5.0.45  # Uncomment to enable MT5 support
+# ctrader-open-api     # Uncomment to enable cTrader tick data download
 # APScheduler==3.10.4  # Uncomment for scheduled spec refresh
