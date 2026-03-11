@@ -44,7 +44,7 @@
 #include "position_validator.h"
 #include "currency_converter.h"
 #include "currency_rate_manager.h"
-#include "simd_intrinsics.h"
+#include "simd_ops.h"
 #include "backtest_log.h"
 #include "risk_manager.h"
 #include <vector>
@@ -633,38 +633,24 @@ public:
     double GetUsedMargin() const {
         if (open_positions_.empty()) return 0.0;
 
-        const size_t SIMD_THRESHOLD = 4;
-        if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
-            RefreshSimdCache();
+        RefreshSimdCache();
 
-            double used_margin = 0.0;
-            // BUY positions use ask price for margin
-            if (!buy_lot_sizes_.empty()) {
-                buy_prices_buffer_.resize(buy_lot_sizes_.size());
-                std::fill(buy_prices_buffer_.begin(), buy_prices_buffer_.end(), current_tick_.ask);
-                used_margin += simd::total_margin_batch(
-                    buy_lot_sizes_.data(), buy_prices_buffer_.data(),
-                    buy_lot_sizes_.size(), config_.contract_size, config_.leverage
-                ) * config_.margin_rate;
-            }
-            // SELL positions use bid price for margin
-            if (!sell_lot_sizes_.empty()) {
-                sell_prices_buffer_.resize(sell_lot_sizes_.size());
-                std::fill(sell_prices_buffer_.begin(), sell_prices_buffer_.end(), current_tick_.bid);
-                used_margin += simd::total_margin_batch(
-                    sell_lot_sizes_.data(), sell_prices_buffer_.data(),
-                    sell_lot_sizes_.size(), config_.contract_size, config_.leverage
-                ) * config_.margin_rate;
-            }
-            return used_margin;
-        }
-
-        // Scalar fallback
         double used_margin = 0.0;
-        for (const Trade* trade : open_positions_) {
-            double price = trade->IsBuy() ? current_tick_.ask : current_tick_.bid;
-            used_margin += trade->lot_size * config_.contract_size * price
-                         / config_.leverage * config_.margin_rate;
+        if (!buy_lot_sizes_.empty()) {
+            buy_prices_buffer_.resize(buy_lot_sizes_.size());
+            std::fill(buy_prices_buffer_.begin(), buy_prices_buffer_.end(), current_tick_.ask);
+            used_margin += simd::total_margin_batch(
+                buy_lot_sizes_.data(), buy_prices_buffer_.data(),
+                buy_lot_sizes_.size(), config_.contract_size, config_.leverage
+            ) * config_.margin_rate;
+        }
+        if (!sell_lot_sizes_.empty()) {
+            sell_prices_buffer_.resize(sell_lot_sizes_.size());
+            std::fill(sell_prices_buffer_.begin(), sell_prices_buffer_.end(), current_tick_.bid);
+            used_margin += simd::total_margin_batch(
+                sell_lot_sizes_.data(), sell_prices_buffer_.data(),
+                sell_lot_sizes_.size(), config_.contract_size, config_.leverage
+            ) * config_.margin_rate;
         }
         return used_margin;
     }
@@ -1112,31 +1098,27 @@ private:
     void UpdateEquity(const Tick& tick) {
         equity_ = balance_;
 
-        // SIMD-optimized P/L calculation for large position counts
-        const size_t SIMD_THRESHOLD = 8;  // Use SIMD for 8+ positions
-
-        if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+        if (!open_positions_.empty()) {
             RefreshSimdCache();
 
-            // Process BUY positions with SIMD using pre-allocated buffer (pool allocator pattern)
+            // Process BUY positions
             if (!buy_entry_prices_.empty()) {
-                // Resize buffer only if needed (avoids allocation if already large enough)
                 if (pnl_buffer_buy_.size() < buy_entry_prices_.size()) {
                     pnl_buffer_buy_.resize(buy_entry_prices_.size());
                 }
                 simd::calculate_pnl_batch(
                     buy_entry_prices_.data(),
                     buy_lot_sizes_.data(),
-                    tick.bid,  // BUY positions close at bid
+                    tick.bid,
                     config_.contract_size,
                     pnl_buffer_buy_.data(),
                     buy_entry_prices_.size(),
-                    true  // is_buy = true
+                    true
                 );
                 equity_ += simd::sum(pnl_buffer_buy_.data(), buy_entry_prices_.size());
             }
 
-            // Process SELL positions with SIMD using pre-allocated buffer
+            // Process SELL positions
             if (!sell_entry_prices_.empty()) {
                 if (pnl_buffer_sell_.size() < sell_entry_prices_.size()) {
                     pnl_buffer_sell_.resize(sell_entry_prices_.size());
@@ -1144,25 +1126,13 @@ private:
                 simd::calculate_pnl_batch(
                     sell_entry_prices_.data(),
                     sell_lot_sizes_.data(),
-                    tick.ask,  // SELL positions close at ask
+                    tick.ask,
                     config_.contract_size,
                     pnl_buffer_sell_.data(),
                     sell_entry_prices_.size(),
-                    false  // is_buy = false
+                    false
                 );
                 equity_ += simd::sum(pnl_buffer_sell_.data(), sell_entry_prices_.size());
-            }
-        } else {
-            // Scalar fallback for small position counts
-            for (Trade* trade : open_positions_) {
-                const bool is_buy = trade->IsBuy();
-                double current_price = is_buy ? tick.bid : tick.ask;
-                double price_diff = current_price - trade->entry_price;
-                if (!is_buy) {
-                    price_diff = -price_diff;
-                }
-                double unrealized_pl = price_diff * trade->lot_size * config_.contract_size;
-                equity_ += unrealized_pl;
             }
         }
 
@@ -1261,153 +1231,59 @@ private:
         }
 
         switch (config_.trade_calc_mode) {
-            case TradeCalcMode::CFD_LEVERAGE: {
-                if (!buy_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && buy_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_cfd_leverage_avx512(
-                            buy_lot_sizes_.data(), buy_prices_buffer_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else if (simd::has_avx2() && buy_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_cfd_leverage_avx2(
-                            buy_lot_sizes_.data(), buy_prices_buffer_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < buy_lot_sizes_.size(); ++i)
-                            margin += buy_lot_sizes_[i] * buy_prices_buffer_[i] * config_.contract_size / config_.leverage * config_.margin_rate;
-                }
-                if (!sell_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && sell_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_cfd_leverage_avx512(
-                            sell_lot_sizes_.data(), sell_prices_buffer_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else if (simd::has_avx2() && sell_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_cfd_leverage_avx2(
-                            sell_lot_sizes_.data(), sell_prices_buffer_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < sell_lot_sizes_.size(); ++i)
-                            margin += sell_lot_sizes_[i] * sell_prices_buffer_[i] * config_.contract_size / config_.leverage * config_.margin_rate;
-                }
+            case TradeCalcMode::CFD_LEVERAGE:
+                if (!buy_lot_sizes_.empty())
+                    margin += simd::total_margin_cfd_leverage(
+                        buy_lot_sizes_.data(), buy_prices_buffer_.data(), buy_lot_sizes_.size(),
+                        config_.contract_size, config_.leverage, config_.margin_rate);
+                if (!sell_lot_sizes_.empty())
+                    margin += simd::total_margin_cfd_leverage(
+                        sell_lot_sizes_.data(), sell_prices_buffer_.data(), sell_lot_sizes_.size(),
+                        config_.contract_size, config_.leverage, config_.margin_rate);
                 break;
-            }
+
             case TradeCalcMode::CFD:
-            case TradeCalcMode::CFD_INDEX: {
-                if (!buy_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && buy_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_cfd_avx512(
-                            buy_lot_sizes_.data(), buy_prices_buffer_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else if (simd::has_avx2() && buy_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_cfd_avx2(
-                            buy_lot_sizes_.data(), buy_prices_buffer_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < buy_lot_sizes_.size(); ++i)
-                            margin += buy_lot_sizes_[i] * buy_prices_buffer_[i] * config_.contract_size * config_.margin_rate;
-                }
-                if (!sell_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && sell_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_cfd_avx512(
-                            sell_lot_sizes_.data(), sell_prices_buffer_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else if (simd::has_avx2() && sell_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_cfd_avx2(
-                            sell_lot_sizes_.data(), sell_prices_buffer_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < sell_lot_sizes_.size(); ++i)
-                            margin += sell_lot_sizes_[i] * sell_prices_buffer_[i] * config_.contract_size * config_.margin_rate;
-                }
+            case TradeCalcMode::CFD_INDEX:
+                if (!buy_lot_sizes_.empty())
+                    margin += simd::total_margin_cfd(
+                        buy_lot_sizes_.data(), buy_prices_buffer_.data(), buy_lot_sizes_.size(),
+                        config_.contract_size, config_.margin_rate);
+                if (!sell_lot_sizes_.empty())
+                    margin += simd::total_margin_cfd(
+                        sell_lot_sizes_.data(), sell_prices_buffer_.data(), sell_lot_sizes_.size(),
+                        config_.contract_size, config_.margin_rate);
                 break;
-            }
-            case TradeCalcMode::FOREX: {
-                // FOREX: margin = lots * cs / leverage * margin_rate (NO price)
-                size_t total = buy_lot_sizes_.size() + sell_lot_sizes_.size();
-                // Combine buy + sell lot sizes for a single pass (price doesn't matter)
-                if (!buy_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && buy_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_forex_avx512(
-                            buy_lot_sizes_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else if (simd::has_avx2() && buy_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_forex_avx2(
-                            buy_lot_sizes_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < buy_lot_sizes_.size(); ++i)
-                            margin += buy_lot_sizes_[i] * config_.contract_size / config_.leverage * config_.margin_rate;
-                }
-                if (!sell_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && sell_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_forex_avx512(
-                            sell_lot_sizes_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else if (simd::has_avx2() && sell_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_forex_avx2(
-                            sell_lot_sizes_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.leverage, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < sell_lot_sizes_.size(); ++i)
-                            margin += sell_lot_sizes_[i] * config_.contract_size / config_.leverage * config_.margin_rate;
-                }
+
+            case TradeCalcMode::FOREX:
+                if (!buy_lot_sizes_.empty())
+                    margin += simd::total_margin_forex(
+                        buy_lot_sizes_.data(), buy_lot_sizes_.size(),
+                        config_.contract_size, config_.leverage, config_.margin_rate);
+                if (!sell_lot_sizes_.empty())
+                    margin += simd::total_margin_forex(
+                        sell_lot_sizes_.data(), sell_lot_sizes_.size(),
+                        config_.contract_size, config_.leverage, config_.margin_rate);
                 break;
-            }
-            case TradeCalcMode::FUTURES: {
-                // FUTURES: margin = lots * margin_initial_fixed
-                if (!buy_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && buy_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_futures_avx512(
-                            buy_lot_sizes_.data(), buy_lot_sizes_.size(), config_.margin_initial_fixed);
-                    else if (simd::has_avx2() && buy_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_futures_avx2(
-                            buy_lot_sizes_.data(), buy_lot_sizes_.size(), config_.margin_initial_fixed);
-                    else
-                        for (size_t i = 0; i < buy_lot_sizes_.size(); ++i)
-                            margin += buy_lot_sizes_[i] * config_.margin_initial_fixed;
-                }
-                if (!sell_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && sell_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_futures_avx512(
-                            sell_lot_sizes_.data(), sell_lot_sizes_.size(), config_.margin_initial_fixed);
-                    else if (simd::has_avx2() && sell_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_futures_avx2(
-                            sell_lot_sizes_.data(), sell_lot_sizes_.size(), config_.margin_initial_fixed);
-                    else
-                        for (size_t i = 0; i < sell_lot_sizes_.size(); ++i)
-                            margin += sell_lot_sizes_[i] * config_.margin_initial_fixed;
-                }
+
+            case TradeCalcMode::FUTURES:
+                if (!buy_lot_sizes_.empty())
+                    margin += simd::total_margin_futures(
+                        buy_lot_sizes_.data(), buy_lot_sizes_.size(), config_.margin_initial_fixed);
+                if (!sell_lot_sizes_.empty())
+                    margin += simd::total_margin_futures(
+                        sell_lot_sizes_.data(), sell_lot_sizes_.size(), config_.margin_initial_fixed);
                 break;
-            }
-            case TradeCalcMode::FOREX_NO_LEVERAGE: {
-                // FOREX_NO_LEVERAGE: margin = lots * cs * margin_rate
-                if (!buy_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && buy_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_forex_nolev_avx512(
-                            buy_lot_sizes_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else if (simd::has_avx2() && buy_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_forex_nolev_avx2(
-                            buy_lot_sizes_.data(), buy_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < buy_lot_sizes_.size(); ++i)
-                            margin += buy_lot_sizes_[i] * config_.contract_size * config_.margin_rate;
-                }
-                if (!sell_lot_sizes_.empty()) {
-                    if (simd::has_avx512() && sell_lot_sizes_.size() >= 8)
-                        margin += simd::total_margin_forex_nolev_avx512(
-                            sell_lot_sizes_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else if (simd::has_avx2() && sell_lot_sizes_.size() >= 4)
-                        margin += simd::total_margin_forex_nolev_avx2(
-                            sell_lot_sizes_.data(), sell_lot_sizes_.size(),
-                            config_.contract_size, config_.margin_rate);
-                    else
-                        for (size_t i = 0; i < sell_lot_sizes_.size(); ++i)
-                            margin += sell_lot_sizes_[i] * config_.contract_size * config_.margin_rate;
-                }
+
+            case TradeCalcMode::FOREX_NO_LEVERAGE:
+                if (!buy_lot_sizes_.empty())
+                    margin += simd::total_margin_forex_nolev(
+                        buy_lot_sizes_.data(), buy_lot_sizes_.size(),
+                        config_.contract_size, config_.margin_rate);
+                if (!sell_lot_sizes_.empty())
+                    margin += simd::total_margin_forex_nolev(
+                        sell_lot_sizes_.data(), sell_lot_sizes_.size(),
+                        config_.contract_size, config_.margin_rate);
                 break;
-            }
         }
         return margin;
     }
@@ -1609,14 +1485,12 @@ private:
         }
 
         // Second pass: batch SL/TP checking with SIMD
-        const size_t SIMD_THRESHOLD = 4;
         std::vector<Trade*> positions_to_close;
         std::vector<std::string> close_reasons;
 
-        if (open_positions_.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+        {
             RefreshSimdCache();
 
-            // Pre-allocate hit buffers (max possible = all positions)
             int max_hits = static_cast<int>(std::max(buy_positions_.size(), sell_positions_.size()));
             std::vector<int> hit_indices(max_hits);
             std::vector<int> hit_types(max_hits);
@@ -1652,35 +1526,6 @@ private:
                         close_reasons.push_back(trade->trailing_activated ? "TRAILING_SL" : "SL");
                     else
                         close_reasons.push_back("TP");
-                }
-            }
-        } else {
-            // Scalar fallback
-            for (Trade* trade : open_positions_) {
-                bool should_close = false;
-                std::string reason;
-
-                if (trade->IsBuy()) {
-                    if (trade->stop_loss > 0 && tick.bid <= trade->stop_loss) {
-                        should_close = true;
-                        reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
-                    } else if (trade->take_profit > 0 && tick.bid >= trade->take_profit) {
-                        should_close = true;
-                        reason = "TP";
-                    }
-                } else {
-                    if (trade->stop_loss > 0 && tick.ask >= trade->stop_loss) {
-                        should_close = true;
-                        reason = trade->trailing_activated ? "TRAILING_SL" : "SL";
-                    } else if (trade->take_profit > 0 && tick.ask <= trade->take_profit) {
-                        should_close = true;
-                        reason = "TP";
-                    }
-                }
-
-                if (should_close) {
-                    positions_to_close.push_back(trade);
-                    close_reasons.push_back(reason);
                 }
             }
         }
