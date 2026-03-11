@@ -6,12 +6,21 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Global compiler flags for SIMD support (AVX2/FMA)
-if(MSVC)
-    add_compile_options(/arch:AVX2)
-else()
-    add_compile_options(-mavx2 -mfma)
-endif()
+# Google Highway for cross-platform SIMD (AVX-512, AVX2, NEON, SVE)
+include(FetchContent)
+FetchContent_Declare(highway
+    GIT_REPOSITORY https://github.com/google/highway.git
+    GIT_TAG 1.2.0
+)
+set(HWY_ENABLE_TESTS OFF CACHE BOOL "")
+set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "")
+set(HWY_ENABLE_INSTALL OFF CACHE BOOL "")
+FetchContent_MakeAvailable(highway)
+
+# SIMD ops library (Highway-based, replaces x86-only simd_intrinsics.h)
+add_library(simd_ops STATIC src/simd_ops.cc)
+target_include_directories(simd_ops PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(simd_ops PUBLIC hwy)
 
 # Output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -56,7 +65,7 @@ endif()
 # Find optional libraries
 find_package(Protobuf QUIET)
 find_package(OpenSSL QUIET)
-find_package(Boost QUIET)
+find_package(Boost QUIET COMPONENTS system thread)
 
 # Link libraries if found
 if(Protobuf_FOUND)
