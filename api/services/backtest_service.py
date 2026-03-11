@@ -120,6 +120,45 @@ def _run_backtest_sync(config: BacktestConfig) -> BacktestResult:
         return BacktestResult(status="error", message=str(e))
 
 
+async def _try_ctrader_download(symbol: str, start_date: str, end_date: str):
+    """Attempt to download tick data from cTrader if credentials are configured.
+    Returns file path on success, None on failure or if not configured.
+    """
+    try:
+        from api.services.ctrader_data_service import is_ctrader_configured, download_ticks
+    except ImportError:
+        return None
+
+    if not is_ctrader_configured():
+        return None
+
+    # Convert YYYY.MM.DD → YYYY-MM-DD if needed
+    dl_start = start_date.replace(".", "-")
+    dl_end = end_date.replace(".", "-")
+
+    logger.info(f"Auto-downloading {symbol} tick data from cTrader...")
+    result = await download_ticks(symbol=symbol, start_date=dl_start, end_date=dl_end)
+
+    if result.get("status") == "success":
+        logger.info(f"cTrader auto-download complete: {result['tick_count']:,} ticks")
+        return result["path"]
+
+    logger.warning(f"cTrader auto-download failed: {result.get('message', 'unknown error')}")
+    return None
+
+
 async def run_backtest(config: BacktestConfig) -> BacktestResult:
-    """Run a backtest via the C++ CLI executable (async wrapper)."""
+    """Run a backtest via the C++ CLI executable (async wrapper).
+
+    If no tick file is found for the symbol, attempts to auto-download
+    from cTrader Open API before falling back to the error response.
+    """
+    # Auto-download tick data if needed (before entering sync thread)
+    if not config.tick_file_path and not find_tick_file(config.symbol):
+        downloaded_path = await _try_ctrader_download(
+            config.symbol, config.start_date, config.end_date,
+        )
+        if downloaded_path:
+            config.tick_file_path = downloaded_path
+
     return await asyncio.to_thread(_run_backtest_sync, config)

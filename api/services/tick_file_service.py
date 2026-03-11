@@ -17,6 +17,7 @@ TICK_SUFFIXES = [
     "_TICKS_2025.csv",
     "_TESTER_TICKS.csv",
     "_TICKS_MT5_EXPORT.csv",
+    "_TICKS_CTRADER.csv",
     "_TICKS.csv",
     "_TICKS_FULL.csv",
 ]
