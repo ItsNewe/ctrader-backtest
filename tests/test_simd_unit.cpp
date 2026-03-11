@@ -3,7 +3,7 @@
  * Tests the vectorized P/L and margin calculations
  */
 
-#include "../include/simd_intrinsics.h"
+#include "../include/simd_ops.h"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -99,7 +99,7 @@ int main() {
     double scalar_margin = scalar::calculate_total_margin(
         lot_sizes.data(), entry_prices.data(), N, contract_size, leverage);
 
-    double simd_margin = simd::total_margin_batch_avx2_optimized(
+    double simd_margin = simd::total_margin_batch(
         lot_sizes.data(), entry_prices.data(), N, contract_size, leverage);
 
     std::cout << "  Scalar Margin: $" << scalar_margin << std::endl;

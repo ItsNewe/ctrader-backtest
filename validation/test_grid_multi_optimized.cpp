@@ -12,7 +12,7 @@
  * Period: 2025.01.01 - 2026.01.29
  */
 
-#include "../include/simd_intrinsics.h"
+#include "../include/simd_ops.h"
 #include "../include/tick_data_manager.h"
 #include <iostream>
 #include <iomanip>
@@ -174,7 +174,7 @@ public:
         double unrealized = 0;
 
         // Gold positions - use SIMD if enough positions
-        if (gold.positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+        if (gold.positions.size() >= SIMD_THRESHOLD) {
             gold.RefreshCache();
             simd::calculate_pnl_batch(
                 gold.entry_prices_cache.data(),
@@ -193,7 +193,7 @@ public:
         }
 
         // Silver positions
-        if (silver.positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+        if (silver.positions.size() >= SIMD_THRESHOLD) {
             silver.RefreshCache();
             simd::calculate_pnl_batch(
                 silver.entry_prices_cache.data(),
@@ -219,7 +219,7 @@ public:
         double margin = 0;
 
         // Gold margin
-        if (gold.positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+        if (gold.positions.size() >= SIMD_THRESHOLD) {
             gold.RefreshCache();
             // Fill price buffer
             size_t n = gold.positions.size();
@@ -228,7 +228,7 @@ public:
             }
             std::fill(margin_prices_buffer_.begin(), margin_prices_buffer_.begin() + n, au_ask);
 
-            margin += simd::total_margin_batch_avx2_optimized(
+            margin += simd::total_margin_batch(
                 gold.lot_sizes_cache.data(),
                 margin_prices_buffer_.data(),
                 n,
@@ -242,7 +242,7 @@ public:
         }
 
         // Silver margin
-        if (silver.positions.size() >= SIMD_THRESHOLD && simd::has_avx2()) {
+        if (silver.positions.size() >= SIMD_THRESHOLD) {
             silver.RefreshCache();
             size_t n = silver.positions.size();
             if (margin_prices_buffer_.size() < n) {
@@ -250,7 +250,7 @@ public:
             }
             std::fill(margin_prices_buffer_.begin(), margin_prices_buffer_.begin() + n, ag_ask);
 
-            margin += simd::total_margin_batch_avx2_optimized(
+            margin += simd::total_margin_batch(
                 silver.lot_sizes_cache.data(),
                 margin_prices_buffer_.data(),
                 n,
@@ -549,8 +549,7 @@ int main() {
 
     // Initialize SIMD
     simd::init();
-    std::cout << "CPU Features: AVX2=" << simd::has_avx2()
-              << " AVX512=" << simd::has_avx512() << std::endl;
+    simd::print_cpu_features();
 
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4;

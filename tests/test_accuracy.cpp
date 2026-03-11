@@ -5,7 +5,7 @@
  * Build: g++ -O3 -march=native -mavx512f -mavx2 -mfma -std=c++17 -I include tests/test_accuracy.cpp -o test_accuracy.exe
  */
 
-#include "../include/simd_intrinsics.h"
+#include "../include/simd_ops.h"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -250,7 +250,7 @@ int main() {
         double leverage = 500.0;
 
         double ref = reference::total_margin(lots.data(), prices.data(), N, contract, leverage);
-        double simd_result = simd::total_margin_batch_avx2_optimized(lots.data(), prices.data(), N, contract, leverage);
+        double simd_result = simd::total_margin_batch(lots.data(), prices.data(), N, contract, leverage);
 
         total_tests++;
         if (check_close(ref, simd_result)) {

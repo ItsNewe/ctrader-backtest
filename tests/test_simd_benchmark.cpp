@@ -5,7 +5,7 @@
  * Build: cd build && cmake .. -G "MinGW Makefiles" && mingw32-make test_simd_benchmark
  */
 
-#include "../include/simd_intrinsics.h"
+#include "../include/simd_ops.h"
 #include <iostream>
 #include <chrono>
 #include <random>
@@ -99,26 +99,14 @@ int main() {
         (void)r;
     }, ITERATIONS);
     double simd_max_time = measure_ms([&]() {
-        volatile double r = simd::max_value(prices.data(), N);  // Uses AVX-512 if available
+        volatile double r = simd::max_value(prices.data(), N);  // Highway auto-dispatch
         (void)r;
     }, ITERATIONS);
     std::cout << "   Scalar:  " << scalar_max_time << " ms\n";
-    std::cout << "   SIMD:    " << simd_max_time << " ms (AVX-512: " << (simd::has_avx512() ? "Yes" : "No") << ")\n";
+    std::cout << "   SIMD:    " << simd_max_time << " ms (Highway auto-dispatch)\n";
     std::cout << "   Speedup: " << scalar_max_time / simd_max_time << "x\n\n";
 
-    // Test 3: SMA
-    std::cout << "3. SMA-14 of " << N << " prices:\n";
-    double scalar_sma_time = measure_ms([&]() {
-        simd::sma_scalar(prices.data(), output.data(), N, 14);
-    }, ITERATIONS);
-    double simd_sma_time = measure_ms([&]() {
-        simd::sma_vectorized(prices.data(), output.data(), N, 14);
-    }, ITERATIONS);
-    std::cout << "   Scalar:  " << scalar_sma_time << " ms\n";
-    std::cout << "   SIMD:    " << simd_sma_time << " ms\n";
-    std::cout << "   Speedup: " << scalar_sma_time / simd_sma_time << "x\n\n";
-
-    // Test 4: P/L Calculation - use larger position count for measurable time
+    // Test 3: P/L Calculation - use larger position count for measurable time
     const size_t LARGE_POSITIONS = 100000;
     std::vector<double> large_entry(LARGE_POSITIONS);
     std::vector<double> large_lots(LARGE_POSITIONS);
@@ -128,7 +116,7 @@ int main() {
         large_lots[i] = lot_dist(rng);
     }
 
-    std::cout << "4. P/L for " << LARGE_POSITIONS << " positions:\n";
+    std::cout << "3. P/L for " << LARGE_POSITIONS << " positions:\n";
     double scalar_pnl_time = measure_ms([&]() {
         scalar::calculate_pnl(large_entry.data(), large_lots.data(), 1950.0,
                               100.0, large_pnl.data(), LARGE_POSITIONS, true);
@@ -138,18 +126,11 @@ int main() {
                                   100.0, large_pnl.data(), LARGE_POSITIONS, true);
     }, ITERATIONS);
     std::cout << "   Scalar:  " << scalar_pnl_time * 1000 << " us\n";
-    std::cout << "   SIMD:    " << simd_pnl_time * 1000 << " us (AVX-512: " << (simd::has_avx512() ? "Yes" : "No") << ")\n";
+    std::cout << "   SIMD:    " << simd_pnl_time * 1000 << " us (Highway auto-dispatch)\n";
     std::cout << "   Speedup: " << scalar_pnl_time / simd_pnl_time << "x\n\n";
 
-    // Test 5: RSI
-    std::cout << "5. RSI-14 of " << N << " prices:\n";
-    double simd_rsi_time = measure_ms([&]() {
-        simd::rsi_vectorized(prices.data(), output.data(), N, 14);
-    }, ITERATIONS);
-    std::cout << "   SIMD:    " << simd_rsi_time << " ms\n\n";
-
-    // Test 6: Drawdown
-    std::cout << "6. Max Drawdown of " << N << " equity points:\n";
+    // Test 4: Drawdown
+    std::cout << "4. Max Drawdown of " << N << " equity points:\n";
     // Create equity curve (cumulative sum with some variance)
     std::vector<double> equity(N);
     equity[0] = 10000;
