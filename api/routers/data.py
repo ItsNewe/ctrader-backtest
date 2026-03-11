@@ -68,7 +68,7 @@ async def check_data_file(symbol: str):
     """Check if tick data exists for a specific symbol."""
     settings = get_settings()
 
-    suffixes = ["_TICKS_2025.csv", "_TESTER_TICKS.csv", "_TICKS_MT5_EXPORT.csv", "_TICKS.csv"]
+    suffixes = ["_TICKS_2025.csv", "_TESTER_TICKS.csv", "_TICKS_MT5_EXPORT.csv", "_TICKS_CTRADER.csv", "_TICKS.csv"]
     search_dirs = [
         settings.data_dir / "Grid",
         settings.data_dir / symbol,
@@ -141,4 +141,30 @@ async def download_ticks(req: TickDownloadRequest):
         }
     except Exception as e:
         logger.error(f"Tick download error: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/download-ctrader-ticks")
+async def download_ctrader_ticks(req: TickDownloadRequest):
+    """Download tick data from cTrader Open API for a symbol and date range.
+
+    Requires CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN,
+    and CTRADER_ACCOUNT_ID environment variables to be set.
+    """
+    try:
+        from api.services.ctrader_data_service import download_ticks as do_download
+        result = await do_download(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            output_dir=req.output_dir,
+        )
+        return result
+    except ImportError:
+        return {
+            "status": "error",
+            "message": "ctrader-open-api package not installed. Install with: pip install ctrader-open-api",
+        }
+    except Exception as e:
+        logger.error(f"cTrader tick download error: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
