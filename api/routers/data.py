@@ -144,6 +144,26 @@ async def download_ticks(req: TickDownloadRequest):
         return {"status": "error", "message": str(e)}
 
 
+@router.get("/ctrader-status")
+async def ctrader_status():
+    """Check if cTrader Open API credentials are configured."""
+    from api.services.ctrader_data_service import is_ctrader_configured
+    return {"status": "success", "configured": is_ctrader_configured()}
+
+
+@router.get("/ctrader-symbols")
+async def list_ctrader_symbols():
+    """List all available symbols from the cTrader Open API."""
+    try:
+        from api.services.ctrader_data_service import list_symbols
+        return await list_symbols()
+    except ImportError:
+        return {"status": "error", "message": "ctrader-open-api package not installed"}
+    except Exception as e:
+        logger.error(f"cTrader symbols error: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
 @router.post("/download-ctrader-ticks")
 async def download_ctrader_ticks(req: TickDownloadRequest):
     """Download tick data from cTrader Open API for a symbol and date range.

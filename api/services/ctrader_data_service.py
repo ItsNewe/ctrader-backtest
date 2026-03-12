@@ -473,3 +473,69 @@ def is_ctrader_configured() -> bool:
         settings.ctrader_access_token,
         settings.ctrader_account_id,
     ])
+
+
+def _list_symbols_sync() -> dict:
+    """Fetch all available symbol names from cTrader Open API (synchronous)."""
+    if not is_ctrader_configured():
+        return {"status": "success", "symbols": []}
+
+    try:
+        from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+            ProtoOAApplicationAuthReq, ProtoOAApplicationAuthRes,
+            ProtoOAAccountAuthReq, ProtoOAAccountAuthRes,
+            ProtoOASymbolsListReq, ProtoOASymbolsListRes,
+        )
+    except ImportError as e:
+        return {"status": "error", "message": f"Missing dependency: {e}"}
+
+    from api.config import get_settings
+    settings = get_settings()
+
+    client_id = settings.ctrader_client_id
+    client_secret = settings.ctrader_client_secret
+    access_token = settings.ctrader_access_token
+    ctid_account = int(settings.ctrader_account_id)
+    host = LIVE_HOST if settings.ctrader_host_type.lower() == "live" else DEMO_HOST
+
+    conn = None
+    try:
+        conn = _CTraderConnection(host, PROTO_PORT)
+
+        # Application auth
+        app_auth = ProtoOAApplicationAuthReq()
+        app_auth.clientId = client_id
+        app_auth.clientSecret = client_secret
+        conn.send(_PT_APP_AUTH_REQ, app_auth)
+        pt, payload = conn.recv()
+        _parse_response(pt, payload, _PT_APP_AUTH_RES, ProtoOAApplicationAuthRes)
+
+        # Account auth
+        acc_auth = ProtoOAAccountAuthReq()
+        acc_auth.ctidTraderAccountId = ctid_account
+        acc_auth.accessToken = access_token
+        conn.send(_PT_ACCOUNT_AUTH_REQ, acc_auth)
+        pt, payload = conn.recv()
+        _parse_response(pt, payload, _PT_ACCOUNT_AUTH_RES, ProtoOAAccountAuthRes)
+
+        # Fetch symbols list
+        sym_req = ProtoOASymbolsListReq()
+        sym_req.ctidTraderAccountId = ctid_account
+        conn.send(_PT_SYMBOLS_LIST_REQ, sym_req)
+        pt, payload = conn.recv(timeout=60)
+        sym_res = _parse_response(pt, payload, _PT_SYMBOLS_LIST_RES, ProtoOASymbolsListRes)
+
+        symbols = sorted([s.symbolName for s in sym_res.symbol if s.symbolName])
+        return {"status": "success", "symbols": symbols}
+
+    except Exception as e:
+        logger.error(f"cTrader list_symbols error: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
+async def list_symbols() -> dict:
+    """Async wrapper for listing cTrader symbols."""
+    return await asyncio.to_thread(_list_symbols_sync)
