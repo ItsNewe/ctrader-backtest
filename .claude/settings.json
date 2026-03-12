@@ -6,12 +6,10 @@
       "Read",
       "Bash(g++ *)",
       "Bash(./test_*)",
-      "Bash(git *)",
       "Bash(ls *)",
       "Bash(cat *)",
       "Bash(mkdir *)",
       "Bash(cd *)",
-      "Bash(python *)",
       "Bash(make *)"
     ],
     "deny": [

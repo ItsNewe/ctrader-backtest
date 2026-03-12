@@ -78,3 +78,6 @@ results/*.db
 !README.txt
 !BUILDING_BLOCKS.md
 !*.md
+
+# Ignore python venv
+.venv/
