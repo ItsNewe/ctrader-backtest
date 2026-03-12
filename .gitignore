@@ -76,8 +76,21 @@ results/*.db
 # Ignore temporary output files
 *.txt
 !README.txt
-!BUILDING_BLOCKS.md
 !*.md
 
 # Ignore python venv
 .venv/
+api/.venv/
+
+# Ignore databases
+*.db
+
+# Ignore cache directories
+cache/
+
+# Ignore node_modules
+node_modules/
+
+# Ignore .NET build artifacts
+dotnet/**/bin/
+dotnet/**/obj/

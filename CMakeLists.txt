@@ -29,17 +29,12 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Source files
 set(SOURCES
     src/main.cpp
-    src/backtest_engine.cpp
-    src/ctrader_connector.cpp
-    src/metatrader_connector.cpp
 )
 
 set(HEADERS
-    include/backtest_engine.h
-    include/ctrader_connector.h
-    include/metatrader_connector.h
     include/margin_manager.h
     include/swap_manager.h
+    include/tick_based_engine.h
 )
 
 # Create executable
