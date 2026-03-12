@@ -1,16 +1,80 @@
 """Backtest execution and history endpoints."""
 
+import asyncio
 import logging
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from api.models.backtest import BacktestConfig
+from api.models.backtest import BacktestConfig, BacktestProgress
 from api.services import backtest_service
+from api.services.backtest_service import start_backtest, get_backtest_progress, get_backtest_result
 from api.services.history_service import save_result, list_history, get_history_entry, delete_history_entry
+from api.ws.manager import ws_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
+
+# ── Async backtest with WebSocket progress ─────────────────────────
+
+@router.post("/start")
+async def api_start_backtest(config: BacktestConfig):
+    """Start an async backtest. Returns backtest_id to track progress via WebSocket."""
+    logger.info(
+        f"Starting async backtest: {config.strategy} on {config.symbol} "
+        f"({config.start_date} - {config.end_date})"
+    )
+
+    async def progress_callback(backtest_id: str, progress: BacktestProgress):
+        await ws_manager.broadcast(backtest_id, progress.model_dump())
+
+    backtest_id = await start_backtest(config, progress_callback=progress_callback)
+    progress = get_backtest_progress(backtest_id)
+
+    return {
+        "status": "ok",
+        "backtest_id": backtest_id,
+        "progress": progress.model_dump() if progress else None,
+    }
+
+
+@router.get("/{backtest_id}/status")
+async def api_backtest_status(backtest_id: str):
+    """Get current backtest progress (polling fallback)."""
+    progress = get_backtest_progress(backtest_id)
+    if not progress:
+        return {"status": "error", "message": f"Backtest {backtest_id} not found"}
+    return {"status": "ok", "progress": progress.model_dump()}
+
+
+@router.websocket("/ws/{backtest_id}")
+async def websocket_backtest(websocket: WebSocket, backtest_id: str):
+    """WebSocket endpoint for real-time backtest progress updates."""
+    await ws_manager.connect(backtest_id, websocket)
+    try:
+        # Send current progress immediately on connect
+        progress = get_backtest_progress(backtest_id)
+        if progress:
+            await websocket.send_json(progress.model_dump())
+
+        # Keep connection alive
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                # Send heartbeat / current status
+                progress = get_backtest_progress(backtest_id)
+                if progress:
+                    await websocket.send_json(progress.model_dump())
+                    if progress.status in ("completed", "error"):
+                        break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_manager.disconnect(backtest_id, websocket)
+
+
+# ── Synchronous backtest (backward compat) ─────────────────────────
 
 @router.post("/run")
 async def run_backtest(config: BacktestConfig):
