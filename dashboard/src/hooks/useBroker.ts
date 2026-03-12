@@ -11,12 +11,16 @@ interface BrokerState {
   activeSymbol: string | null;
   loading: boolean;
   error: string | null;
+  ctraderConfigured: boolean;
+  ctraderSymbols: string[];
+  dataSymbols: string[];
 
   connect: (config: BrokerConnectRequest) => Promise<boolean>;
   fetchSymbols: () => Promise<void>;
   fetchSpec: (symbol: string) => Promise<InstrumentSpec | null>;
   setActiveSymbol: (symbol: string) => void;
   checkStatus: () => Promise<void>;
+  fetchDataSources: () => Promise<void>;
 }
 
 export const useBroker = create<BrokerState>((set, get) => ({
@@ -28,6 +32,9 @@ export const useBroker = create<BrokerState>((set, get) => ({
   activeSymbol: null,
   loading: false,
   error: null,
+  ctraderConfigured: false,
+  ctraderSymbols: [],
+  dataSymbols: [],
 
   connect: async (config) => {
     set({ loading: true, error: null });
@@ -96,5 +103,25 @@ export const useBroker = create<BrokerState>((set, get) => ({
       const res = await apiGet<{ connected: boolean; active_broker: string | null }>('/api/broker/status');
       set({ connected: res.connected, brokerKey: res.active_broker });
     } catch { /* API not running yet */ }
+  },
+
+  fetchDataSources: async () => {
+    // Fetch symbols from tick data files on disk
+    try {
+      const res = await apiGet<{ status: string; symbols: string[] }>('/api/data/symbols');
+      if (res.status === 'success') set({ dataSymbols: res.symbols });
+    } catch { /* non-critical */ }
+
+    // Check cTrader status and fetch symbols if configured
+    try {
+      const res = await apiGet<{ status: string; configured: boolean }>('/api/data/ctrader-status');
+      if (res.configured) {
+        set({ ctraderConfigured: true });
+        try {
+          const symRes = await apiGet<{ status: string; symbols: string[] }>('/api/data/ctrader-symbols');
+          if (symRes.status === 'success') set({ ctraderSymbols: symRes.symbols });
+        } catch { /* ctrader symbols fetch failed */ }
+      }
+    } catch { /* non-critical */ }
   },
 }));

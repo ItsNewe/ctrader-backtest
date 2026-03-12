@@ -3,6 +3,7 @@ import { Play, X, Grid3x3, Shuffle, ArrowUpDown, Trophy, AlertTriangle, ChevronD
 import { useBacktest } from '../hooks/useBacktest';
 import { useBroker } from '../hooks/useBroker';
 import { useSweep } from '../hooks/useSweep';
+import { SymbolPicker } from '../components/SymbolPicker';
 import { Heatmap } from '../components/sweep/Heatmap';
 import { apiPost } from '../api/client';
 import type { SweepConfig, SweepResultEntry, ParameterRange } from '../types/sweep';
@@ -15,7 +16,7 @@ const SYMBOL_DEFAULTS: Record<string, { contract_size: number; leverage: number;
 
 export function Sweep() {
   const { strategies, selectedStrategy, setSelectedStrategy, fetchStrategies } = useBacktest();
-  const { activeSymbol, specs } = useBroker();
+  const { activeSymbol, setActiveSymbol, specs } = useBroker();
   const { progress, results, running, error, startSweep, cancelSweep, reset } = useSweep();
 
   // Sweep config state
@@ -205,7 +206,7 @@ export function Sweep() {
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Symbol</label>
-                <input type="text" value={symbol} readOnly className="w-full px-3 py-1.5 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono" />
+                <SymbolPicker value={symbol} onChange={setActiveSymbol} disabled={running} />
               </div>
               <div>
                 <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Start</label>

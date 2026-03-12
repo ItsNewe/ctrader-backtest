@@ -15,7 +15,7 @@ interface RecentEntry {
 }
 
 export function Dashboard() {
-  const { connected, activeSymbol, specs } = useBroker();
+  const { connected, ctraderConfigured, activeSymbol, specs } = useBroker();
   const [health, setHealth] = useState<{ backtest_cli_exists: boolean; data_dir_exists: boolean } | null>(null);
   const [dataFiles, setDataFiles] = useState<DataFile[]>([]);
   const [recentEntries, setRecentEntries] = useState<RecentEntry[]>([]);
@@ -54,8 +54,8 @@ export function Dashboard() {
         <StatusCard
           icon={Activity}
           label="Broker"
-          value={connected ? 'Connected' : 'Disconnected'}
-          color={connected ? 'var(--color-success)' : 'var(--color-danger)'}
+          value={connected ? 'MT5 Connected' : ctraderConfigured ? 'cTrader' : 'Disconnected'}
+          color={connected || ctraderConfigured ? 'var(--color-success)' : 'var(--color-danger)'}
         />
         <StatusCard
           icon={Cpu}

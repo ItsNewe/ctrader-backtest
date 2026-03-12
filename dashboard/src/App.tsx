@@ -14,11 +14,13 @@ import { useBroker } from './hooks/useBroker';
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const checkStatus = useBroker((s) => s.checkStatus);
+  const fetchDataSources = useBroker((s) => s.fetchDataSources);
 
-  // Check broker status on mount
+  // Check broker status and data sources on mount
   useEffect(() => {
     checkStatus();
-  }, [checkStatus]);
+    fetchDataSources();
+  }, [checkStatus, fetchDataSources]);
 
   // Listen for navigate events from child components
   useEffect(() => {

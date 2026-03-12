@@ -1,43 +1,18 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Search, ChevronDown, ChevronRight, Database } from 'lucide-react';
 import { useBroker } from '../../hooks/useBroker';
-import { apiGet } from '../../api/client';
-
-function categorizeSymbol(symbol: string): string {
-  const s = symbol.toUpperCase();
-  if (s.startsWith('XAU') || s.startsWith('XAG') || s.startsWith('XPT') || s.startsWith('XPD'))
-    return 'Metals';
-  if (s.includes('NAS') || s.includes('SPX') || s.includes('US30') || s.includes('US500') || s.includes('DAX') || s.includes('FTSE') || s.includes('US100'))
-    return 'Indices';
-  if (s.includes('BTC') || s.includes('ETH') || s.includes('LTC'))
-    return 'Crypto';
-  if (s.includes('OIL') || s.includes('BRENT') || s.includes('GAS') || s.includes('COCOA') || s.includes('COFFEE'))
-    return 'Commodities';
-  if (s.length === 6 || s.length === 7)
-    return 'Forex';
-  return 'Other';
-}
+import { categorizeSymbol } from '../SymbolPicker';
 
 export function Sidebar() {
-  const { symbols: brokerSymbols, activeSymbol, setActiveSymbol, connected } = useBroker();
+  const { symbols: brokerSymbols, activeSymbol, setActiveSymbol, connected, ctraderConfigured, ctraderSymbols, dataSymbols } = useBroker();
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [dataSymbols, setDataSymbols] = useState<string[]>([]);
 
-  // Fetch symbols that have tick data available (works without MT5)
-  useEffect(() => {
-    apiGet<{ status: string; symbols: string[] }>('/api/data/symbols')
-      .then((res) => {
-        if (res.status === 'success') setDataSymbols(res.symbols);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Merge broker symbols + data symbols (deduplicated)
+  // Merge broker symbols + data symbols + cTrader symbols (deduplicated)
   const allSymbols = useMemo(() => {
-    const set = new Set([...brokerSymbols, ...dataSymbols]);
+    const set = new Set([...brokerSymbols, ...dataSymbols, ...ctraderSymbols]);
     return Array.from(set).sort();
-  }, [brokerSymbols, dataSymbols]);
+  }, [brokerSymbols, dataSymbols, ctraderSymbols]);
 
   const grouped = useMemo(() => {
     const filtered = allSymbols.filter((s) =>
@@ -129,6 +104,8 @@ export function Sidebar() {
       <div className="px-3 py-1.5 border-t border-[var(--color-border)] text-[10px] text-[var(--color-text-muted)]">
         {connected ? (
           <span className="text-[var(--color-success)]">&#9679; MT5</span>
+        ) : ctraderConfigured ? (
+          <span className="text-[var(--color-success)]">&#9679; cTrader</span>
         ) : (
           <span>&#9679; Offline</span>
         )}

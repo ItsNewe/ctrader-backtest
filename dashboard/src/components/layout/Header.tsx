@@ -7,7 +7,7 @@ interface HeaderProps {
 }
 
 export function Header({ currentPage, onNavigate }: HeaderProps) {
-  const { connected, brokerKey, accountInfo } = useBroker();
+  const { connected, brokerKey, accountInfo, ctraderConfigured } = useBroker();
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: TrendingUp },
@@ -57,11 +57,11 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
         <div className="flex items-center gap-1.5">
           <div
             className={`w-2 h-2 rounded-full ${
-              connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-danger)]'
+              connected || ctraderConfigured ? 'bg-[var(--color-success)]' : 'bg-[var(--color-danger)]'
             }`}
           />
           <span className="text-[var(--color-text-secondary)]">
-            {connected ? brokerKey : 'Disconnected'}
+            {connected ? brokerKey : ctraderConfigured ? 'cTrader' : 'Disconnected'}
           </span>
         </div>
       </div>
