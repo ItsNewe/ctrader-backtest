@@ -1,4 +1,4 @@
-"""WebSocket connection manager for real-time sweep progress."""
+"""WebSocket connection manager for real-time progress (backtests, sweeps)."""
 
 import asyncio
 import json
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
-    """Manages WebSocket connections grouped by sweep_id."""
+    """Manages WebSocket connections grouped by resource ID (backtest, sweep, etc.)."""
 
     def __init__(self):
         self.active: Dict[str, Set[WebSocket]] = {}

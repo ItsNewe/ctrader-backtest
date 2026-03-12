@@ -105,3 +105,11 @@ class BacktestResult(BaseModel):
     # Error info
     message: Optional[str] = None
     error_info: Optional[dict] = None  # Structured error details
+
+
+class BacktestProgress(BaseModel):
+    backtest_id: str
+    status: str       # "running" | "completed" | "error"
+    phase: str        # checking_data, downloading, download_complete, running_engine, saving_history, completed, error
+    message: str = ""
+    result: Optional[dict] = None  # Full BacktestResult on completion
