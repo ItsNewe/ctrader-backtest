@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Play, Loader2, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { useBacktest } from '../hooks/useBacktest';
 import { useBroker } from '../hooks/useBroker';
+import { SymbolPicker } from '../components/SymbolPicker';
 import { EquityChart } from '../components/charts/EquityChart';
 import { ResultsSummary } from '../components/backtest/ResultsSummary';
 import { TradeTable } from '../components/backtest/TradeTable';
@@ -14,15 +15,28 @@ const SYMBOL_DEFAULTS: Record<string, { contract_size: number; leverage: number;
   XAGUSD: { contract_size: 5000, leverage: 500, pip_size: 0.001, swap_long: -15.0, swap_short: 13.72 },
 };
 
+function phaseLabel(phase: string): string {
+  switch (phase) {
+    case 'checking_data': return 'Checking data';
+    case 'downloading': return 'Downloading tick data';
+    case 'download_complete': return 'Download complete';
+    case 'running_engine': return 'Running backtest';
+    case 'saving_history': return 'Saving to history';
+    case 'completed': return 'Complete';
+    case 'error': return 'Error';
+    default: return phase;
+  }
+}
+
 export function Backtest() {
-  const { strategies, selectedStrategy, setSelectedStrategy, result, running, error, fetchStrategies, runBacktest, clearResult } = useBacktest();
-  const { activeSymbol, specs } = useBroker();
+  const { strategies, selectedStrategy, setSelectedStrategy, result, running, error, progress, fetchStrategies, runBacktest, clearResult } = useBacktest();
+  const { activeSymbol, setActiveSymbol, specs } = useBroker();
 
   // Strategy params form state
   const [params, setParams] = useState<Record<string, number | string | boolean>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [startDate, setStartDate] = useState('2025.01.01');
-  const [endDate, setEndDate] = useState('2025.12.30');
+  const [startDate, setStartDate] = useState('2025-01-01');
+  const [endDate, setEndDate] = useState('2025-12-30');
   const [balance, setBalance] = useState(10000);
 
   // Fetch strategies on mount
@@ -60,11 +74,13 @@ export function Backtest() {
   };
 
   const handleRun = () => {
+    // Convert YYYY-MM-DD (date input) to YYYY.MM.DD (backend format)
+    const toBackendDate = (d: string) => d.replace(/-/g, '.');
     const config: BacktestConfig = {
       strategy: selectedStrategy || 'FillUpOscillation',
       symbol,
-      start_date: startDate,
-      end_date: endDate,
+      start_date: toBackendDate(startDate),
+      end_date: toBackendDate(endDate),
       initial_balance: balance,
       ...brokerSettings,
       strategy_params: params,
@@ -117,30 +133,23 @@ export function Backtest() {
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Symbol</label>
-                <input
-                  type="text"
-                  value={symbol}
-                  readOnly
-                  className="w-full px-3 py-1.5 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] font-mono"
-                />
+                <SymbolPicker value={symbol} onChange={setActiveSymbol} />
               </div>
               <div>
                 <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Start</label>
                 <input
-                  type="text"
+                  type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  placeholder="2025.01.01"
                   className="w-full px-3 py-1.5 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
                 />
               </div>
               <div>
                 <label className="block text-xs text-[var(--color-text-secondary)] mb-1">End</label>
                 <input
-                  type="text"
+                  type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  placeholder="2025.12.30"
                   className="w-full px-3 py-1.5 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
                 />
               </div>
@@ -229,6 +238,19 @@ export function Backtest() {
           </div>
         </div>
       </div>
+
+      {/* Progress status */}
+      {running && progress && (
+        <div className="flex items-center gap-3 p-3 rounded bg-[var(--color-bg-secondary)] border border-[var(--color-border)]">
+          <Loader2 size={16} className="animate-spin text-[var(--color-accent)] shrink-0" />
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text-primary)]">{phaseLabel(progress.phase)}</div>
+            {progress.message && (
+              <div className="text-xs text-[var(--color-text-muted)] truncate">{progress.message}</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Error */}
       {error && (

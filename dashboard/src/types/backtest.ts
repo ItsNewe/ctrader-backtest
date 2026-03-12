@@ -102,6 +102,14 @@ export interface BacktestResult {
   };
 }
 
+export interface BacktestProgress {
+  backtest_id: string;
+  status: 'running' | 'completed' | 'error';
+  phase: string;
+  message: string;
+  result?: BacktestResult | null;
+}
+
 export interface DataFile {
   name: string;
   path: string;
